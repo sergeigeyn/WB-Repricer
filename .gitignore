@@ -23,6 +23,10 @@ yarn-error.log*
 .env.*.local
 backend/.env
 
+# === Server Credentials ===
+.server-credentials
+scripts/ssh_cmd.sh
+
 # === IDE ===
 .vscode/
 .idea/
