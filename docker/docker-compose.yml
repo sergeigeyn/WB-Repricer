@@ -1,0 +1,135 @@
+version: "3.9"
+
+services:
+  # === Database ===
+  postgres:
+    image: postgres:16-alpine
+    container_name: pf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: priceforge
+      POSTGRES_PASSWORD: priceforge_dev
+      POSTGRES_DB: priceforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U priceforge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # === Cache & Message Broker ===
+  redis:
+    image: redis:7-alpine
+    container_name: pf-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # === Backend API ===
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: pf-backend
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - DEBUG=true
+      - WB_API_MOCK_MODE=true
+    env_file:
+      - ../backend/.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # === Celery Worker ===
+  celery-worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: pf-celery-worker
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    env_file:
+      - ../backend/.env
+    volumes:
+      - ../backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # === Celery Beat (Scheduler) ===
+  celery-beat:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: pf-celery-beat
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    environment:
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/1
+    env_file:
+      - ../backend/.env
+    volumes:
+      - ../backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # === Frontend (Vite dev server) ===
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: pf-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  # === Nginx Reverse Proxy ===
+  nginx:
+    image: nginx:alpine
+    container_name: pf-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  pg_data:
+  redis_data:
