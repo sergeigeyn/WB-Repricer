@@ -1,13 +1,32 @@
-"""JWT token management and password hashing."""
+"""JWT token management, password hashing, and AES encryption."""
 
+import base64
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 import jwt
+from cryptography.fernet import Fernet
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _get_fernet() -> Fernet:
+    """Derive Fernet key from AES_SECRET_KEY."""
+    key = hashlib.sha256(settings.AES_SECRET_KEY.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
+def encrypt_api_key(plain_key: str) -> str:
+    """Encrypt WB API key for storage."""
+    return _get_fernet().encrypt(plain_key.encode()).decode()
+
+
+def decrypt_api_key(encrypted_key: str) -> str:
+    """Decrypt WB API key from storage."""
+    return _get_fernet().decrypt(encrypted_key.encode()).decode()
 
 
 def hash_password(password: str) -> str:

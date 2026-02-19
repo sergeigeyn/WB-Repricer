@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # AES encryption for API keys in DB
     AES_SECRET_KEY: str = "change-me-32-bytes-key-here!!!!!"
 
+    # Seed admin user (read from .env, not from code)
+    ADMIN_EMAIL: str = "admin@priceforge.ru"
+    ADMIN_PASSWORD: str = ""
+    ADMIN_NAME: str = "Администратор"
+
     # Celery
     CELERY_BROKER_URL: str = "redis://redis:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://redis:6379/2"

@@ -28,6 +28,9 @@ httpx==0.28.1
 # Telegram bot
 aiogram==3.17.0
 
+# Encryption
+cryptography==44.0.0
+
 # Utils
 python-multipart==0.0.20
 python-dotenv==1.0.1
