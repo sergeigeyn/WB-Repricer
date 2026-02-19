@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Button, Typography } from 'antd';
+import { Layout, Menu, Button, Typography, Space } from 'antd';
 import {
   DashboardOutlined,
   ShoppingOutlined,
@@ -10,6 +10,7 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 
@@ -28,6 +29,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const logout = useAuthStore((s) => s.logout);
+  const user = useAuthStore((s) => s.user);
+  const fetchUser = useAuthStore((s) => s.fetchUser);
+
+  useEffect(() => {
+    if (!user) {
+      fetchUser();
+    }
+  }, [user, fetchUser]);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -52,9 +61,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(!collapsed)}
           />
-          <Button type="text" icon={<LogoutOutlined />} onClick={logout}>
-            Выход
-          </Button>
+          <Space>
+            {user && (
+              <Typography.Text type="secondary">
+                <UserOutlined /> {user.name}
+              </Typography.Text>
+            )}
+            <Button type="text" icon={<LogoutOutlined />} onClick={logout}>
+              Выход
+            </Button>
+          </Space>
         </Header>
         <Content style={{ margin: '24px 16px', padding: 24, background: '#fff', borderRadius: 8 }}>
           {children}

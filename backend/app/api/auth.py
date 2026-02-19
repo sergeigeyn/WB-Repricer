@@ -1,6 +1,8 @@
-"""Auth endpoints: login, logout, me."""
+"""Auth endpoints: login, refresh, me."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,14 +14,44 @@ from app.schemas.user import UserResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
 
 async def get_current_user(
-    token: str = Depends(lambda: None),  # placeholder, will use OAuth2PasswordBearer
+    token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Dependency: extract current user from JWT token."""
-    # This is a simplified version; full implementation will use OAuth2PasswordBearer
-    raise HTTPException(status_code=401, detail="Not implemented yet")
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = decode_token(token)
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except InvalidTokenError:
+        raise credentials_exception
+
+    if payload.get("type") != "access":
+        raise credentials_exception
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise credentials_exception
+
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise credentials_exception
+
+    return user
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -69,6 +101,5 @@ async def refresh_token(data: RefreshRequest, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me():
-    # Will be implemented with proper auth dependency
-    raise HTTPException(status_code=501, detail="Auth dependency not yet configured")
+async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
