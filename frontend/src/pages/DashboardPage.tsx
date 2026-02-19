@@ -1,7 +1,6 @@
 import { Card, Col, Row, Statistic, Typography } from 'antd';
 import {
   ArrowUpOutlined,
-  ArrowDownOutlined,
   ShoppingCartOutlined,
   DollarOutlined,
   WarningOutlined,
