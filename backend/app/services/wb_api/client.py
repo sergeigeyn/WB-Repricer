@@ -22,6 +22,7 @@ WB_PRICES = "https://discounts-prices-api.wildberries.ru"
 WB_STATISTICS = "https://statistics-api.wildberries.ru"
 WB_MARKETPLACE = "https://marketplace-api.wildberries.ru"
 WB_ADVERT = "https://advert-api.wildberries.ru"
+WB_COMMON = "https://common-api.wildberries.ru"
 
 
 class BaseWBClient(ABC):
@@ -166,3 +167,47 @@ class WBApiClient(BaseWBClient):
         sales = data if isinstance(data, list) else []
         logger.info("Fetched %d sales from WB", len(sales))
         return sales
+
+    async def get_commissions(self) -> dict[str, float]:
+        """Fetch WB commission rates by product category (public API, no auth).
+
+        Returns: {subject_name: commission_pct} where commission_pct is
+        the FBO marketplace commission (kgvpMarketplace).
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(
+                f"{WB_COMMON}/api/v1/tariffs/commission"
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        report = data.get("report", [])
+        result: dict[str, float] = {}
+        for item in report:
+            name = item.get("subjectName", "")
+            commission = item.get("kgvpMarketplace", 0)
+            if name:
+                result[name] = commission
+
+        logger.info("Fetched commission rates for %d categories", len(result))
+        return result
+
+    async def get_box_tariffs(self) -> dict[str, Any]:
+        """Fetch box delivery and storage tariffs (public API, no auth).
+
+        Returns tariff data including base delivery/storage costs and coefficients.
+        """
+        from datetime import date as date_type
+        today = date_type.today().isoformat()
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(
+                f"{WB_COMMON}/api/v1/tariffs/box",
+                params={"date": today},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        tariffs = data.get("response", {}).get("data", {}).get("warehouseList", [])
+        logger.info("Fetched box tariffs for %d warehouses", len(tariffs))
+        return data

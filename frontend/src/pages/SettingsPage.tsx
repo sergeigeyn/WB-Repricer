@@ -3,6 +3,7 @@ import {
   Card,
   Form,
   Input,
+  InputNumber,
   Button,
   Typography,
   message,
@@ -29,6 +30,8 @@ interface WBAccount {
   api_key_masked: string;
   is_active: boolean;
   permissions: string[] | null;
+  tax_rate: number | null;
+  tariff_rate: number | null;
   created_at: string;
 }
 
@@ -122,6 +125,18 @@ export default function SettingsPage() {
     }
   };
 
+  const handleUpdateAccount = async (id: number, field: 'tax_rate' | 'tariff_rate', value: number | null) => {
+    try {
+      await apiClient.patch(`/settings/wb-accounts/${id}`, { [field]: value });
+      setAccounts((prev) =>
+        prev.map((acc) => (acc.id === id ? { ...acc, [field]: value } : acc))
+      );
+      message.success('Сохранено');
+    } catch {
+      message.error('Ошибка сохранения');
+    }
+  };
+
   const handleCheckPermissions = async (id: number) => {
     setCheckingId(id);
     try {
@@ -154,6 +169,56 @@ export default function SettingsPage() {
       dataIndex: 'api_key_masked',
       key: 'api_key_masked',
       render: (text: string) => <code>{text}</code>,
+    },
+    {
+      title: 'Налог %',
+      dataIndex: 'tax_rate',
+      key: 'tax_rate',
+      width: 110,
+      render: (_: unknown, record: WBAccount) => (
+        <InputNumber
+          size="small"
+          min={0}
+          max={50}
+          step={0.1}
+          placeholder="0"
+          value={record.tax_rate}
+          onBlur={(e) => {
+            const val = e.target.value ? parseFloat(e.target.value) : null;
+            if (val !== record.tax_rate) handleUpdateAccount(record.id, 'tax_rate', val);
+          }}
+          onPressEnter={(e) => {
+            const val = (e.target as HTMLInputElement).value ? parseFloat((e.target as HTMLInputElement).value) : null;
+            if (val !== record.tax_rate) handleUpdateAccount(record.id, 'tax_rate', val);
+          }}
+          style={{ width: 80 }}
+        />
+      ),
+    },
+    {
+      title: 'Конструктор %',
+      dataIndex: 'tariff_rate',
+      key: 'tariff_rate',
+      width: 130,
+      render: (_: unknown, record: WBAccount) => (
+        <InputNumber
+          size="small"
+          min={0}
+          max={50}
+          step={0.1}
+          placeholder="0"
+          value={record.tariff_rate}
+          onBlur={(e) => {
+            const val = e.target.value ? parseFloat(e.target.value) : null;
+            if (val !== record.tariff_rate) handleUpdateAccount(record.id, 'tariff_rate', val);
+          }}
+          onPressEnter={(e) => {
+            const val = (e.target as HTMLInputElement).value ? parseFloat((e.target as HTMLInputElement).value) : null;
+            if (val !== record.tariff_rate) handleUpdateAccount(record.id, 'tariff_rate', val);
+          }}
+          style={{ width: 80 }}
+        />
+      ),
     },
     {
       title: 'Разрешения',

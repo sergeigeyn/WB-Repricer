@@ -10,6 +10,11 @@ class WBAccountCreate(BaseModel):
     api_key: str = Field(..., min_length=10, examples=["eyJhbGciOi..."])
 
 
+class WBAccountUpdate(BaseModel):
+    tax_rate: float | None = None
+    tariff_rate: float | None = None
+
+
 class WBAccountResponse(BaseModel):
     id: int
     name: str
@@ -17,6 +22,8 @@ class WBAccountResponse(BaseModel):
     user_id: int
     is_active: bool
     permissions: list[str] | None = None
+    tax_rate: float | None = None
+    tariff_rate: float | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

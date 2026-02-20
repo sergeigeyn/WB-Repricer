@@ -16,6 +16,7 @@ from app.schemas.wb_account import (
     WBAccountCreate,
     WBAccountList,
     WBAccountResponse,
+    WBAccountUpdate,
     WBKeyValidationResult,
 )
 
@@ -130,6 +131,8 @@ async def create_wb_account(
         user_id=account.user_id,
         is_active=account.is_active,
         permissions=permissions,
+        tax_rate=float(account.tax_rate) if account.tax_rate else None,
+        tariff_rate=float(account.tariff_rate) if account.tariff_rate else None,
         created_at=account.created_at,
     )
 
@@ -169,10 +172,63 @@ async def list_wb_accounts(
             user_id=acc.user_id,
             is_active=acc.is_active,
             permissions=perms,
+            tax_rate=float(acc.tax_rate) if acc.tax_rate else None,
+            tariff_rate=float(acc.tariff_rate) if acc.tariff_rate else None,
             created_at=acc.created_at,
         ))
 
     return WBAccountList(items=items, total=total)
+
+
+@router.patch("/wb-accounts/{account_id}", response_model=WBAccountResponse)
+async def update_wb_account(
+    account_id: int,
+    data: WBAccountUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update WB account settings (tax rate, tariff constructor rate)."""
+    result = await db.execute(
+        select(WBAccount).where(
+            WBAccount.id == account_id,
+            WBAccount.user_id == current_user.id,
+        )
+    )
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    if data.tax_rate is not None:
+        account.tax_rate = data.tax_rate
+    if data.tariff_rate is not None:
+        account.tariff_rate = data.tariff_rate
+
+    await db.flush()
+
+    try:
+        decrypted = decrypt_api_key(account.api_key_encrypted)
+        masked = _mask_key(decrypted)
+    except Exception:
+        masked = "***invalid***"
+
+    perms = None
+    if account.permissions_json:
+        try:
+            perms = json.loads(account.permissions_json)
+        except (json.JSONDecodeError, TypeError):
+            perms = None
+
+    return WBAccountResponse(
+        id=account.id,
+        name=account.name,
+        api_key_masked=masked,
+        user_id=account.user_id,
+        is_active=account.is_active,
+        permissions=perms,
+        tax_rate=float(account.tax_rate) if account.tax_rate else None,
+        tariff_rate=float(account.tariff_rate) if account.tariff_rate else None,
+        created_at=account.created_at,
+    )
 
 
 @router.delete("/wb-accounts/{account_id}")

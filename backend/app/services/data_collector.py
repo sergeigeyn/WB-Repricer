@@ -284,6 +284,46 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
     return upserted
 
 
+async def sync_tariffs(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
+    """Sync WB commission rates by product category.
+
+    Fetches commission rates from WB Common API (public, no auth)
+    and updates commission_pct for each product based on its category.
+    Returns number of products with updated commission.
+    """
+    # Fetch commission rates by category
+    try:
+        commissions = await client.get_commissions()
+    except Exception as e:
+        logger.warning("Failed to fetch commissions: %s", e)
+        return 0
+
+    if not commissions:
+        logger.info("No commission data received")
+        return 0
+
+    # Get products for this account
+    result = await db.execute(
+        select(Product).where(Product.account_id == account_id)
+    )
+    products = list(result.scalars().all())
+
+    updated = 0
+    for product in products:
+        if not product.category:
+            continue
+        commission = commissions.get(product.category)
+        if commission is not None:
+            new_val = round(commission, 2)
+            if product.commission_pct != new_val:
+                product.commission_pct = new_val
+                updated += 1
+
+    await db.flush()
+    logger.info("Updated commission for %d products (account %d)", updated, account_id)
+    return updated
+
+
 async def collect_all() -> dict:
     """Main entry point: collect products, prices and stocks for all active WB accounts.
 
@@ -295,6 +335,7 @@ async def collect_all() -> dict:
         "price_snapshots": 0,
         "stocks_updated": 0,
         "orders_synced": 0,
+        "commissions_updated": 0,
         "errors": [],
     }
 
@@ -323,6 +364,9 @@ async def collect_all() -> dict:
                 orders_count = await sync_orders(db, client, account.id)
                 results["orders_synced"] += orders_count
 
+                commissions_count = await sync_tariffs(db, client, account.id)
+                results["commissions_updated"] += commissions_count
+
             except Exception as e:
                 error_msg = f"Account {account.id} ({account.name}): {e}"
                 logger.error("Data collection failed: %s", error_msg)
@@ -331,11 +375,12 @@ async def collect_all() -> dict:
         await db.commit()
 
     logger.info(
-        "Data collection complete: %d accounts, %d products, %d prices, %d stocks, %d orders",
+        "Data collection complete: %d accounts, %d products, %d prices, %d stocks, %d orders, %d commissions",
         results["accounts"],
         results["products_synced"],
         results["price_snapshots"],
         results["stocks_updated"],
         results["orders_synced"],
+        results["commissions_updated"],
     )
     return results

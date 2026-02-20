@@ -3,6 +3,7 @@ import {
   Table,
   Typography,
   Input,
+  InputNumber,
   Tag,
   Image,
   Space,
@@ -36,9 +37,14 @@ interface Product {
   current_price: number | null;
   discount_pct: number | null;
   final_price: number | null;
+  commission_pct: number | null;
+  logistics_cost: number | null;
+  storage_cost: number | null;
+  ad_cost: number | null;
   total_stock: number;
   orders_7d: number;
   margin_pct: number | null;
+  margin_rub: number | null;
   is_active: boolean;
 }
 
@@ -161,6 +167,17 @@ export default function ProductsPage() {
     },
   };
 
+  const handleUpdateAdCost = async (productId: number, value: number | null) => {
+    try {
+      await apiClient.put(`/products/${productId}/cost`, { ad_cost: value });
+      setProducts((prev) =>
+        prev.map((p) => (p.id === productId ? { ...p, ad_cost: value } : p))
+      );
+    } catch {
+      message.error('Ошибка сохранения');
+    }
+  };
+
   const formatPrice = (val: number | null) => {
     if (val === null || val === undefined) return '—';
     return `${val.toLocaleString('ru-RU')} ₽`;
@@ -265,9 +282,68 @@ export default function ProductsPage() {
       title: 'Себест.',
       dataIndex: 'cost_price',
       key: 'cost_price',
-      width: 110,
+      width: 100,
       align: 'right',
       render: formatPrice,
+    },
+    {
+      title: 'Комис. %',
+      dataIndex: 'commission_pct',
+      key: 'commission_pct',
+      width: 85,
+      align: 'center',
+      render: (val: number | null) => {
+        if (val === null || val === undefined) return '—';
+        return <Typography.Text type="secondary">{val}%</Typography.Text>;
+      },
+    },
+    {
+      title: 'Логист.',
+      dataIndex: 'logistics_cost',
+      key: 'logistics_cost',
+      width: 90,
+      align: 'right',
+      render: (val: number | null) => {
+        if (val === null || val === undefined) return '—';
+        return `${val} ₽`;
+      },
+    },
+    {
+      title: 'Хран.',
+      dataIndex: 'storage_cost',
+      key: 'storage_cost',
+      width: 80,
+      align: 'right',
+      render: (val: number | null) => {
+        if (val === null || val === undefined) return '—';
+        return `${val} ₽`;
+      },
+    },
+    {
+      title: 'Реклама',
+      dataIndex: 'ad_cost',
+      key: 'ad_cost',
+      width: 100,
+      align: 'center',
+      render: (_: number | null, record: Product) => (
+        <InputNumber
+          size="small"
+          min={0}
+          step={1}
+          placeholder="0"
+          value={record.ad_cost}
+          onBlur={(e) => {
+            const val = e.target.value ? parseFloat(e.target.value) : null;
+            if (val !== record.ad_cost) handleUpdateAdCost(record.id, val);
+          }}
+          onPressEnter={(e) => {
+            const val = (e.target as HTMLInputElement).value ? parseFloat((e.target as HTMLInputElement).value) : null;
+            if (val !== record.ad_cost) handleUpdateAdCost(record.id, val);
+          }}
+          style={{ width: 70 }}
+          suffix="₽"
+        />
+      ),
     },
     {
       title: 'Маржа',
@@ -275,10 +351,17 @@ export default function ProductsPage() {
       key: 'margin_pct',
       width: 90,
       align: 'center',
-      render: (val: number | null) => {
+      render: (val: number | null, record: Product) => {
         if (val === null || val === undefined) return '—';
         const color = val < 10 ? 'red' : val < 25 ? 'orange' : 'green';
-        return <Tag color={color}>{val}%</Tag>;
+        return (
+          <Typography.Text>
+            <Tag color={color}>{val}%</Tag>
+            {record.margin_rub !== null && record.margin_rub !== undefined && (
+              <div style={{ fontSize: 11, color: '#888' }}>{record.margin_rub} ₽</div>
+            )}
+          </Typography.Text>
+        );
       },
       sorter: true,
     },
@@ -350,7 +433,7 @@ export default function ProductsPage() {
         rowKey="id"
         loading={loading}
         size="middle"
-        scroll={{ x: 1400 }}
+        scroll={{ x: 1800 }}
         onChange={(pagination, _filters, sorter) => {
           // Обновляем страницу из пагинации
           if (pagination.current) {

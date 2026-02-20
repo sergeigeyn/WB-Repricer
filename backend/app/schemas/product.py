@@ -14,7 +14,6 @@ class ProductResponse(BaseModel):
     title: str | None
     image_url: str | None
     cost_price: float | None
-    tax_rate: float | None
     total_stock: int = 0
     is_active: bool
     is_locomotive: bool
@@ -23,9 +22,15 @@ class ProductResponse(BaseModel):
     current_price: float | None = None
     discount_pct: float | None = None
     final_price: float | None = None
+    # Unit economics
+    commission_pct: float | None = None
+    logistics_cost: float | None = None
+    storage_cost: float | None = None
+    ad_cost: float | None = None
     # Calculated metrics
     orders_7d: int = 0
     margin_pct: float | None = None
+    margin_rub: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -37,5 +42,6 @@ class ProductList(BaseModel):
 
 class ProductCostUpdate(BaseModel):
     cost_price: float | None = None
-    tax_rate: float | None = None
-    extra_costs_json: str | None = None
+    ad_cost: float | None = None
+    logistics_cost: float | None = None
+    storage_cost: float | None = None

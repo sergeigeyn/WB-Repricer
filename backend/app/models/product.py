@@ -17,6 +17,8 @@ class WBAccount(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     permissions_json: Mapped[str | None] = mapped_column(Text)  # JSON list of permissions
+    tax_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))  # Tax % (УСН/ОСН)
+    tariff_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))  # Конструктор тарифов %
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -35,7 +37,10 @@ class Product(Base):
     image_url: Mapped[str | None] = mapped_column(String(500))
     barcode: Mapped[str | None] = mapped_column(String(50), index=True)
     cost_price: Mapped[float | None] = mapped_column(Numeric(12, 2))
-    tax_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    commission_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))  # WB commission %
+    logistics_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Logistics ₽ per unit
+    storage_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Storage ₽ per unit
+    ad_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Advertising ₽ per unit
     extra_costs_json: Mapped[str | None] = mapped_column(Text)  # JSON
     total_stock: Mapped[int] = mapped_column(default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
