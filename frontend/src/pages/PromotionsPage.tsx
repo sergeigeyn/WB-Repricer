@@ -1,7 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Table, Tag, Tabs, Typography, Spin, message } from 'antd';
+import {
+  Button,
+  DatePicker,
+  Form,
+  Input,
+  message,
+  Modal,
+  Space,
+  Spin,
+  Table,
+  Tabs,
+  Tag,
+  Typography,
+  Upload,
+} from 'antd';
+import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import type { UploadFile } from 'antd/es/upload';
 import apiClient from '@/api/client';
 
 interface Promotion {
@@ -35,6 +51,7 @@ const statusLabels: Record<string, string> = {
 const typeLabels: Record<string, string> = {
   regular: 'Обычная',
   auto: 'Авто',
+  import: 'Импорт',
 };
 
 function formatDate(d: string | null): string {
@@ -47,6 +64,10 @@ export default function PromotionsPage() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active');
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [form] = Form.useForm();
 
   const fetchPromotions = async (status?: string) => {
     setLoading(true);
@@ -54,7 +75,7 @@ export default function PromotionsPage() {
       const params = status && status !== 'all' ? { status } : {};
       const res = await apiClient.get('/promotions', { params });
       setPromotions(res.data.items || []);
-    } catch (e: any) {
+    } catch {
       message.error('Ошибка загрузки акций');
     } finally {
       setLoading(false);
@@ -64,6 +85,49 @@ export default function PromotionsPage() {
   useEffect(() => {
     fetchPromotions(activeTab);
   }, [activeTab]);
+
+  const handleImport = async () => {
+    try {
+      const values = await form.validateFields();
+      if (!fileList.length) {
+        message.warning('Выберите файл');
+        return;
+      }
+
+      setImporting(true);
+      const formData = new FormData();
+      formData.append('file', fileList[0].originFileObj as File);
+      formData.append('name', values.name);
+      if (values.dates?.[0]) {
+        formData.append('start_date', values.dates[0].format('YYYY-MM-DD'));
+      }
+      if (values.dates?.[1]) {
+        formData.append('end_date', values.dates[1].format('YYYY-MM-DD'));
+      }
+
+      const res = await apiClient.post('/promotions/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const data = res.data;
+      message.success(`Импортировано ${data.imported} товаров в акцию "${data.name}"`);
+      if (data.errors?.length) {
+        message.warning(`Ошибки: ${data.errors.length} строк`);
+      }
+
+      setImportOpen(false);
+      form.resetFields();
+      setFileList([]);
+      // Switch to "all" tab to see the imported promotion
+      setActiveTab('all');
+      fetchPromotions('all');
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      message.error(detail || 'Ошибка импорта');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const columns: ColumnsType<Promotion> = [
     {
@@ -148,7 +212,13 @@ export default function PromotionsPage() {
 
   return (
     <div>
-      <Typography.Title level={3}>Акции</Typography.Title>
+      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
+        <Typography.Title level={3} style={{ margin: 0 }}>Акции</Typography.Title>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>
+          Загрузить акцию
+        </Button>
+      </Space>
+
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -170,6 +240,62 @@ export default function PromotionsPage() {
           scroll={{ x: 1100 }}
         />
       </Spin>
+
+      <Modal
+        title="Загрузить акцию из Excel/CSV"
+        open={importOpen}
+        onCancel={() => {
+          setImportOpen(false);
+          form.resetFields();
+          setFileList([]);
+        }}
+        onOk={handleImport}
+        okText="Загрузить"
+        cancelText="Отмена"
+        confirmLoading={importing}
+        width={520}
+      >
+        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            name="name"
+            label="Название акции"
+            rules={[{ required: true, message: 'Введите название акции' }]}
+          >
+            <Input placeholder="Например: Весенняя распродажа 2026" />
+          </Form.Item>
+
+          <Form.Item name="dates" label="Период акции">
+            <DatePicker.RangePicker
+              style={{ width: '100%' }}
+              format="DD.MM.YYYY"
+              placeholder={['Дата начала', 'Дата окончания']}
+            />
+          </Form.Item>
+
+          <Form.Item label="Файл акции (Excel или CSV)" required>
+            <Upload
+              fileList={fileList}
+              beforeUpload={(file) => {
+                const valid = /\.(xlsx|xls|csv)$/i.test(file.name);
+                if (!valid) {
+                  message.error('Поддерживаются файлы .xlsx, .xls, .csv');
+                  return Upload.LIST_IGNORE;
+                }
+                setFileList([file as any]);
+                return false;
+              }}
+              onRemove={() => setFileList([])}
+              maxCount={1}
+              accept=".xlsx,.xls,.csv"
+            >
+              <Button icon={<UploadOutlined />}>Выбрать файл</Button>
+            </Upload>
+            <Typography.Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+              Файл из кабинета WB с колонками: Артикул WB, Плановая цена, Скидка, Текущая цена, Участвует
+            </Typography.Text>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

@@ -1,8 +1,10 @@
 """Promotion endpoints."""
 
-from datetime import UTC, datetime
+import csv
+import io
+from datetime import UTC, date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,7 @@ from app.schemas.promotion import (
     PromotionProductResponse,
     PromotionResponse,
 )
+from app.services.promotion_collector import calculate_promo_margin, _determine_status
 
 router = APIRouter(prefix="/promotions", tags=["promotions"])
 
@@ -190,3 +193,227 @@ async def update_decisions(
 
     await db.commit()
     return {"updated": updated}
+
+
+@router.post("/import")
+async def import_promotion(
+    file: UploadFile,
+    name: str = Form(...),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Import promotion from Excel/CSV file downloaded from WB.
+
+    Expected columns (Russian or English, flexible matching):
+    - Артикул WB / nmID / nm_id / Артикул
+    - Плановая цена / planPrice / Акционная цена / План цена
+    - Плановая скидка / planDiscount / Скидка акции %
+    - Текущая цена / currentPrice
+    - Участвует / inAction / В акции (да/нет/true/false)
+
+    Form fields:
+    - name: promotion name (required)
+    - start_date: YYYY-MM-DD (optional)
+    - end_date: YYYY-MM-DD (optional)
+    """
+    # Parse dates
+    parsed_start: date | None = None
+    parsed_end: date | None = None
+    try:
+        if start_date:
+            parsed_start = date.fromisoformat(start_date)
+        if end_date:
+            parsed_end = date.fromisoformat(end_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    # Read file
+    filename = file.filename or ""
+    content = await file.read()
+
+    rows: list[dict[str, str]] = []
+
+    if filename.endswith((".xlsx", ".xls")):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
+            ws = wb.active
+            headers = [str(cell.value or "").strip().lower() for cell in next(ws.iter_rows(max_row=1))]
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                row_dict = {headers[i]: str(v) if v is not None else "" for i, v in enumerate(row) if i < len(headers)}
+                rows.append(row_dict)
+        except ImportError:
+            raise HTTPException(status_code=400, detail="Excel support requires openpyxl. Use CSV format.")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse Excel: {e}")
+    else:
+        # CSV
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = content.decode("cp1251")
+
+        first_line = text.split("\n")[0]
+        delimiter = ";" if ";" in first_line else ("," if "," in first_line else "\t")
+
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+        for row in reader:
+            rows.append({k.strip().lower(): v.strip() for k, v in row.items() if k})
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="File is empty or has no data rows")
+
+    # Column aliases → internal field names
+    aliases = {
+        "артикул wb": "nm_id", "артикул вб": "nm_id", "артикул": "nm_id",
+        "nmid": "nm_id", "nm_id": "nm_id", "nm id": "nm_id",
+        "код номенклатуры": "nm_id", "номенклатура": "nm_id",
+        "плановая цена": "plan_price", "план цена": "plan_price",
+        "planprice": "plan_price", "plan_price": "plan_price",
+        "акционная цена": "plan_price", "цена акции": "plan_price",
+        "цена для акции": "plan_price", "загруженная цена": "plan_price",
+        "плановая скидка": "plan_discount", "скидка акции": "plan_discount",
+        "скидка акции %": "plan_discount", "plandiscount": "plan_discount",
+        "plan_discount": "plan_discount", "скидка для акции": "plan_discount",
+        "текущая цена": "current_price", "currentprice": "current_price",
+        "current_price": "current_price", "цена до скидки": "current_price",
+        "цена": "current_price",
+        "участвует": "in_action", "в акции": "in_action",
+        "inaction": "in_action", "in_action": "in_action",
+        "статус участия": "in_action",
+    }
+
+    normalized_rows = []
+    for row in rows:
+        norm: dict[str, str] = {}
+        for k, v in row.items():
+            key = aliases.get(k, k)
+            norm[key] = v
+        normalized_rows.append(norm)
+
+    # Get first account
+    acc_result = await db.execute(select(WBAccount).where(WBAccount.is_active == True).limit(1))  # noqa: E712
+    account = acc_result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=400, detail="No active WB account")
+
+    account_id = account.id
+    account_tax = float(account.tax_rate) if account.tax_rate else 0.0
+    account_tariff = float(account.tariff_rate) if account.tariff_rate else 0.0
+
+    # Create promotion
+    status = _determine_status(parsed_start, parsed_end)
+    promo = Promotion(
+        account_id=account_id,
+        name=name,
+        start_date=parsed_start,
+        end_date=parsed_end,
+        promo_type="import",
+        status=status,
+        is_active=status != "ended",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    db.add(promo)
+    await db.flush()  # get promo.id
+
+    # Load products for margin calculation
+    prod_result = await db.execute(
+        select(Product).where(Product.account_id == account_id)
+    )
+    products = list(prod_result.scalars().all())
+    nm_to_product = {p.nm_id: p for p in products}
+
+    imported = 0
+    errors: list[str] = []
+
+    for i, row in enumerate(normalized_rows, start=2):
+        nm_id_str = row.get("nm_id", "")
+        if not nm_id_str:
+            continue
+
+        try:
+            nm_id = int(float(nm_id_str))
+        except (ValueError, TypeError):
+            errors.append(f"Row {i}: invalid nm_id '{nm_id_str}'")
+            continue
+
+        # Parse plan_price
+        plan_price_str = row.get("plan_price", "")
+        plan_price = None
+        if plan_price_str:
+            try:
+                plan_price = float(plan_price_str.replace(",", ".").replace(" ", ""))
+            except ValueError:
+                pass
+
+        # Parse plan_discount
+        plan_discount_str = row.get("plan_discount", "")
+        plan_discount = None
+        if plan_discount_str:
+            try:
+                plan_discount = float(plan_discount_str.replace(",", ".").replace("%", "").replace(" ", ""))
+            except ValueError:
+                pass
+
+        # Parse current_price
+        current_price_str = row.get("current_price", "")
+        current_price = None
+        if current_price_str:
+            try:
+                current_price = float(current_price_str.replace(",", ".").replace(" ", ""))
+            except ValueError:
+                pass
+
+        # Parse in_action
+        in_action_str = row.get("in_action", "").lower()
+        in_action = in_action_str in ("да", "yes", "true", "1", "участвует")
+
+        # Calculate margins
+        product = nm_to_product.get(nm_id)
+        current_margin_pct = None
+        current_margin_rub = None
+        promo_margin_pct = None
+        promo_margin_rub = None
+
+        if product:
+            if current_price:
+                current_margin_pct, current_margin_rub = calculate_promo_margin(
+                    product, current_price, account_tax, account_tariff
+                )
+            if plan_price:
+                promo_margin_pct, promo_margin_rub = calculate_promo_margin(
+                    product, plan_price, account_tax, account_tariff
+                )
+
+        db.add(PromotionProduct(
+            promotion_id=promo.id,
+            account_id=account_id,
+            nm_id=nm_id,
+            plan_price=plan_price,
+            plan_discount=plan_discount,
+            current_price=current_price,
+            in_action=in_action,
+            promo_price=plan_price,
+            current_margin_pct=current_margin_pct,
+            current_margin_rub=current_margin_rub,
+            promo_margin_pct=promo_margin_pct,
+            promo_margin_rub=promo_margin_rub,
+            decision="pending",
+        ))
+        imported += 1
+
+    # Update promotion counts
+    promo.total_available = imported
+    promo.in_action_count = sum(1 for r in normalized_rows if r.get("in_action", "").lower() in ("да", "yes", "true", "1", "участвует"))
+
+    await db.commit()
+
+    return {
+        "promotion_id": promo.id,
+        "name": promo.name,
+        "imported": imported,
+        "errors": errors[:50],
+    }
