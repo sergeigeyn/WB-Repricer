@@ -127,8 +127,41 @@ async def sync_prices(db: AsyncSession, client: WBApiClient, account_id: int) ->
     return snapshots_count
 
 
+async def sync_stocks(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
+    """Sync stock quantities from WB Marketplace API into Product.total_stock.
+
+    Returns number of products with updated stock.
+    """
+    try:
+        stock_map = await client.get_stocks()
+    except Exception as e:
+        logger.warning("Failed to fetch stocks: %s", e)
+        return 0
+
+    if not stock_map:
+        logger.info("No stock data from warehouses for account %d", account_id)
+        return 0
+
+    # Get products for this account
+    result = await db.execute(
+        select(Product).where(Product.account_id == account_id)
+    )
+    products = list(result.scalars().all())
+    updated = 0
+
+    for product in products:
+        qty = stock_map.get(product.nm_id, 0)
+        if product.total_stock != qty:
+            product.total_stock = qty
+            updated += 1
+
+    await db.flush()
+    logger.info("Updated stock for %d products (account %d)", updated, account_id)
+    return updated
+
+
 async def collect_all() -> dict:
-    """Main entry point: collect products and prices for all active WB accounts.
+    """Main entry point: collect products, prices and stocks for all active WB accounts.
 
     Returns summary of what was collected.
     """
@@ -136,6 +169,7 @@ async def collect_all() -> dict:
         "accounts": 0,
         "products_synced": 0,
         "price_snapshots": 0,
+        "stocks_updated": 0,
         "errors": [],
     }
 
@@ -158,6 +192,9 @@ async def collect_all() -> dict:
                 prices_count = await sync_prices(db, client, account.id)
                 results["price_snapshots"] += prices_count
 
+                stocks_count = await sync_stocks(db, client, account.id)
+                results["stocks_updated"] += stocks_count
+
             except Exception as e:
                 error_msg = f"Account {account.id} ({account.name}): {e}"
                 logger.error("Data collection failed: %s", error_msg)
@@ -166,9 +203,10 @@ async def collect_all() -> dict:
         await db.commit()
 
     logger.info(
-        "Data collection complete: %d accounts, %d products, %d prices",
+        "Data collection complete: %d accounts, %d products, %d prices, %d stocks",
         results["accounts"],
         results["products_synced"],
         results["price_snapshots"],
+        results["stocks_updated"],
     )
     return results

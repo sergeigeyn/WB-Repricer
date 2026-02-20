@@ -47,6 +47,7 @@ async def _enrich_with_prices(
                 image_url=p.image_url,
                 cost_price=float(p.cost_price) if p.cost_price else None,
                 tax_rate=float(p.tax_rate) if p.tax_rate else None,
+                total_stock=p.total_stock,
                 is_active=p.is_active,
                 is_locomotive=p.is_locomotive,
                 created_at=p.created_at,
@@ -66,6 +67,7 @@ async def list_products(
     brand: str | None = None,
     category: str | None = None,
     is_active: bool | None = None,
+    in_stock: bool | None = None,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
@@ -86,6 +88,8 @@ async def list_products(
         query = query.where(Product.category == category)
     if is_active is not None:
         query = query.where(Product.is_active == is_active)
+    if in_stock:
+        query = query.where(Product.total_stock >= 1)
 
     count_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = count_result.scalar() or 0

@@ -114,6 +114,41 @@ class WBApiClient(BaseWBClient):
         logger.info("Fetched prices for %d goods from WB", len(all_goods))
         return all_goods
 
+    async def get_warehouses(self) -> list[dict[str, Any]]:
+        """Fetch seller's FBS warehouses."""
+        data = await self._request(
+            "GET", f"{WB_MARKETPLACE}/api/v3/warehouses"
+        )
+        return data if isinstance(data, list) else []
+
+    async def get_stocks(self) -> dict[int, int]:
+        """Fetch stock quantities across all seller warehouses.
+
+        Returns: {nm_id: total_quantity}
+        """
+        warehouses = await self.get_warehouses()
+        stock_map: dict[int, int] = {}
+
+        for wh in warehouses:
+            wh_id = wh.get("id")
+            if not wh_id:
+                continue
+            try:
+                data = await self._request(
+                    "GET",
+                    f"{WB_MARKETPLACE}/api/v3/stocks/{wh_id}?skip=0&take=1000",
+                )
+                for item in data.get("stocks", []):
+                    nm_id = item.get("nmId", 0)
+                    qty = item.get("amount", 0)
+                    if nm_id:
+                        stock_map[nm_id] = stock_map.get(nm_id, 0) + qty
+            except Exception as e:
+                logger.warning("Stocks for warehouse %s failed: %s", wh_id, e)
+
+        logger.info("Fetched stocks from %d warehouses, %d SKUs", len(warehouses), len(stock_map))
+        return stock_map
+
     async def get_orders(self, date_from: str) -> list[dict[str, Any]]:
         """Fetch orders via Statistics API."""
         data = await self._request(

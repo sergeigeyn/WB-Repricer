@@ -15,6 +15,7 @@ class ProductResponse(BaseModel):
     image_url: str | None
     cost_price: float | None
     tax_rate: float | None
+    total_stock: int = 0
     is_active: bool
     is_locomotive: bool
     created_at: datetime

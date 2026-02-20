@@ -7,6 +7,7 @@ import {
   Image,
   Space,
   Button,
+  Switch,
   message,
 } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
@@ -25,6 +26,7 @@ interface Product {
   current_price: number | null;
   discount_pct: number | null;
   final_price: number | null;
+  total_stock: number;
   is_active: boolean;
 }
 
@@ -34,6 +36,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [search, setSearch] = useState('');
+  const [inStock, setInStock] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
@@ -45,6 +48,7 @@ export default function ProductsPage() {
         limit: pageSize,
       };
       if (search) params.search = search;
+      if (inStock) params.in_stock = true;
       const { data } = await apiClient.get('/products', { params });
       setProducts(data.items);
       setTotal(data.total);
@@ -53,7 +57,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search]);
+  }, [page, search, inStock]);
 
   useEffect(() => {
     fetchProducts();
@@ -131,6 +135,19 @@ export default function ProductsPage() {
       ellipsis: true,
     },
     {
+      title: 'Остаток',
+      dataIndex: 'total_stock',
+      key: 'total_stock',
+      width: 90,
+      align: 'center',
+      render: (val: number) => {
+        if (!val) return <Tag color="red">0</Tag>;
+        const color = val <= 5 ? 'orange' : 'green';
+        return <Tag color={color}>{val}</Tag>;
+      },
+      sorter: (a, b) => a.total_stock - b.total_stock,
+    },
+    {
       title: 'Цена до скидки',
       dataIndex: 'current_price',
       key: 'current_price',
@@ -181,6 +198,15 @@ export default function ProductsPage() {
             }}
             style={{ width: 300 }}
             allowClear
+          />
+          <Switch
+            checked={inStock}
+            onChange={(checked) => {
+              setInStock(checked);
+              setPage(1);
+            }}
+            checkedChildren="В наличии"
+            unCheckedChildren="Все"
           />
           <Button
             icon={<ReloadOutlined />}

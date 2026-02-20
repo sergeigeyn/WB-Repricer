@@ -36,6 +36,7 @@ class Product(Base):
     cost_price: Mapped[float | None] = mapped_column(Numeric(12, 2))
     tax_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))
     extra_costs_json: Mapped[str | None] = mapped_column(Text)  # JSON
+    total_stock: Mapped[int] = mapped_column(default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
     is_locomotive: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
