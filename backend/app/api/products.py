@@ -68,10 +68,12 @@ async def _enrich_with_prices(
         final_price = float(snap.final_price) if snap and snap.final_price else None
         cost_price = float(p.cost_price) if p.cost_price else None
 
-        # Calculate margin
+        # Calculate margin: (final_price - cost_price - tax) / final_price * 100
+        tax_rate = float(p.tax_rate) if p.tax_rate else None
         margin_pct = None
         if final_price and cost_price and final_price > 0:
-            margin_pct = round((final_price - cost_price) / final_price * 100, 1)
+            tax_amount = final_price * tax_rate / 100 if tax_rate else 0
+            margin_pct = round((final_price - cost_price - tax_amount) / final_price * 100, 1)
 
         items.append(
             ProductResponse(
