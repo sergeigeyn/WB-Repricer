@@ -44,6 +44,12 @@ const PERMISSION_LABELS: Record<string, { label: string; color: string }> = {
   statistics: { label: 'Статистика', color: 'purple' },
   analytics: { label: 'Аналитика', color: 'orange' },
   marketplace: { label: 'Маркетплейс', color: 'cyan' },
+  advert: { label: 'Реклама', color: 'red' },
+  feedbacks: { label: 'Отзывы', color: 'gold' },
+  questions: { label: 'Вопросы', color: 'lime' },
+  recommendations: { label: 'Рекомендации', color: 'geekblue' },
+  returns: { label: 'Возвраты', color: 'volcano' },
+  common: { label: 'Тарифы', color: 'magenta' },
 };
 
 export default function SettingsPage() {

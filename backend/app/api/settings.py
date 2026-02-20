@@ -23,11 +23,28 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
 
 WB_API_ENDPOINTS = {
+    # Product cards
     "content": ("POST", "https://content-api.wildberries.ru/content/v2/get/cards/list", {"settings": {"cursor": {"limit": 1}, "filter": {"withPhoto": -1}}}),
+    # Prices & discounts
     "prices": ("GET", "https://discounts-prices-api.wb.ru/api/v2/list/goods/filter?limit=1", None),
+    # Statistics (orders, sales, incomes)
     "statistics": ("GET", "https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=2025-01-01", None),
+    # Seller analytics
     "analytics": ("GET", "https://seller-analytics-api.wildberries.ru/api/v2/nm-report/detail/history?period=day&limit=1", None),
+    # Marketplace (FBO/FBS orders, stocks, warehouses)
     "marketplace": ("GET", "https://marketplace-api.wildberries.ru/api/v3/orders?limit=1", None),
+    # Advertising / promotions
+    "advert": ("GET", "https://advert-api.wildberries.ru/adv/v1/promotion/count", None),
+    # Reviews / feedbacks
+    "feedbacks": ("GET", "https://feedbacks-api.wildberries.ru/api/v1/feedbacks/count", None),
+    # Questions
+    "questions": ("GET", "https://questions-api.wildberries.ru/api/v1/questions/count", None),
+    # Recommendations
+    "recommendations": ("GET", "https://recommendations-api.wildberries.ru/api/v1/ins/list", None),
+    # Returns
+    "returns": ("GET", "https://returns-api.wildberries.ru/api/v1/returns?limit=1", None),
+    # Common (acceptance coefficients, tariffs)
+    "common": ("GET", "https://common-api.wildberries.ru/api/v1/tariffs/box", None),
 }
 
 
