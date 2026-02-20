@@ -57,7 +57,11 @@ def _mask_key(key: str) -> str:
 
 
 async def _check_wb_permissions(api_key: str) -> list[str]:
-    """Test WB API key against different endpoints to determine permissions."""
+    """Test WB API key against different endpoints to determine permissions.
+
+    Only 200/201 counts as confirmed access. Everything else (401, 403, 400,
+    429, 5xx, timeouts) means no confirmed access for that section.
+    """
     permissions = []
     async with httpx.AsyncClient(timeout=10.0) as client:
         for perm_name, (method, url, body) in WB_API_ENDPOINTS.items():
@@ -68,15 +72,14 @@ async def _check_wb_permissions(api_key: str) -> list[str]:
                 resp = await client.request(method, url, **kwargs)
                 if resp.status_code in (200, 201):
                     permissions.append(perm_name)
-                elif resp.status_code == 401:
-                    continue  # No access to this API
                 else:
-                    # 4xx/5xx but not 401 — might have access but other error
-                    permissions.append(perm_name)
+                    logger.debug(
+                        "WB permission %s: HTTP %s", perm_name, resp.status_code
+                    )
             except httpx.TimeoutException:
-                continue
-            except Exception:
-                continue
+                logger.debug("WB permission %s: timeout", perm_name)
+            except Exception as e:
+                logger.debug("WB permission %s: error %s", perm_name, e)
     return permissions
 
 
