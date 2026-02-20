@@ -2,7 +2,7 @@
 
 import csv
 import io
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -39,8 +39,10 @@ async def _enrich_with_prices(
     result = await db.execute(latest_prices_q)
     snapshots = {s.product_id: s for s in result.scalars().all()}
 
-    # Get orders and returns for last 7 days per product (net orders = orders - returns)
-    seven_days_ago = (datetime.now(UTC) - timedelta(days=7)).date()
+    # Get orders and returns for last 7 full days (excluding today), Moscow timezone
+    MSK = timezone(timedelta(hours=3))
+    today_msk = datetime.now(MSK).date()
+    seven_days_ago = today_msk - timedelta(days=7)
     orders_q = (
         select(
             SalesDaily.product_id,
@@ -50,6 +52,7 @@ async def _enrich_with_prices(
         .where(
             SalesDaily.product_id.in_(product_ids),
             SalesDaily.date >= seven_days_ago,
+            SalesDaily.date < today_msk,
         )
         .group_by(SalesDaily.product_id)
     )

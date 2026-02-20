@@ -2,7 +2,7 @@
 
 import logging
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -184,10 +184,13 @@ async def sync_stocks(db: AsyncSession, client: WBApiClient, account_id: int) ->
 async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
     """Sync orders and returns from WB Statistics API into SalesDaily.
 
-    Fetches last 7 days of orders and sales (returns), aggregates by (nm_id, date),
+    Fetches last 7 days of orders and sales (returns), aggregates by (nm_id, date MSK),
     upserts into sales_daily. Returns number of daily records upserted.
     """
-    date_from = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00")
+    # WB works in Moscow timezone (UTC+3)
+    MSK = timezone(timedelta(hours=3))
+    now_msk = datetime.now(MSK)
+    date_from = (now_msk - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00")
 
     # Build nm_id → product_id map
     result = await db.execute(
@@ -202,7 +205,17 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
         logger.warning("Failed to fetch orders: %s", e)
         orders = []
 
-    # Aggregate orders by (nm_id, date), excluding cancelled
+    def _parse_date_msk(date_str: str) -> date | None:
+        """Parse WB date string and convert to Moscow date."""
+        if not date_str:
+            return None
+        try:
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            return dt.astimezone(MSK).date()
+        except (ValueError, AttributeError):
+            return None
+
+    # Aggregate orders by (nm_id, date MSK), excluding cancelled
     daily_orders: dict[tuple[int, date], int] = defaultdict(int)
     for order in orders:
         if order.get("isCancel"):
@@ -210,12 +223,8 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
         nm_id = order.get("nmId")
         if not nm_id or nm_id not in product_map:
             continue
-        order_date_str = order.get("date", "")
-        if not order_date_str:
-            continue
-        try:
-            order_date = datetime.fromisoformat(order_date_str.replace("Z", "+00:00")).date()
-        except (ValueError, AttributeError):
+        order_date = _parse_date_msk(order.get("date", ""))
+        if not order_date:
             continue
         daily_orders[(nm_id, order_date)] += 1
 
@@ -226,7 +235,7 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
         logger.warning("Failed to fetch sales: %s", e)
         sales = []
 
-    # Count returns by (nm_id, date)
+    # Count returns by (nm_id, date MSK)
     daily_returns: dict[tuple[int, date], int] = defaultdict(int)
     for sale in sales:
         if not sale.get("isReturn"):
@@ -234,12 +243,8 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
         nm_id = sale.get("nmId")
         if not nm_id or nm_id not in product_map:
             continue
-        sale_date_str = sale.get("date", "")
-        if not sale_date_str:
-            continue
-        try:
-            sale_date = datetime.fromisoformat(sale_date_str.replace("Z", "+00:00")).date()
-        except (ValueError, AttributeError):
+        sale_date = _parse_date_msk(sale.get("date", ""))
+        if not sale_date:
             continue
         daily_returns[(nm_id, sale_date)] += 1
 
