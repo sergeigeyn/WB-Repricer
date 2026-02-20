@@ -101,7 +101,7 @@ async def download_cost_template(
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["nm_id", "vendor_code", "title", "cost_price", "tax_rate"])
+    writer.writerow(["Артикул WB", "Артикул", "Название", "Себестоимость", "Налог %"])
     for p in products:
         writer.writerow([
             p.nm_id,
@@ -169,6 +169,21 @@ async def import_costs(
     if not rows:
         raise HTTPException(status_code=400, detail="File is empty or has no data rows")
 
+    # Map Russian headers to internal field names
+    header_aliases = {
+        "артикул wb": "nm_id", "артикул вб": "nm_id",
+        "себестоимость": "cost_price", "себест.": "cost_price", "закупочная": "cost_price",
+        "налог %": "tax_rate", "налог": "tax_rate", "ставка налога": "tax_rate",
+    }
+    normalized_rows = []
+    for row in rows:
+        norm = {}
+        for k, v in row.items():
+            key = header_aliases.get(k, k)  # k is already lowercased
+            norm[key] = v
+        normalized_rows.append(norm)
+    rows = normalized_rows
+
     # Build nm_id lookup
     result = await db.execute(select(Product))
     all_products = {p.nm_id: p for p in result.scalars().all()}
@@ -227,7 +242,7 @@ async def export_costs(
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["nm_id", "vendor_code", "brand", "title", "cost_price", "tax_rate", "total_stock"])
+    writer.writerow(["Артикул WB", "Артикул", "Бренд", "Название", "Себестоимость", "Налог %", "Остаток"])
     for p in products:
         writer.writerow([
             p.nm_id,

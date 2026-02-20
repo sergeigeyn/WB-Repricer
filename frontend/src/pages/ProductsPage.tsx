@@ -197,12 +197,6 @@ export default function ProductsPage() {
       width: 100,
     },
     {
-      title: 'Название',
-      dataIndex: 'title',
-      key: 'title',
-      ellipsis: true,
-    },
-    {
       title: 'Бренд',
       dataIndex: 'brand',
       key: 'brand',
@@ -356,7 +350,7 @@ export default function ProductsPage() {
         rowKey="id"
         loading={loading}
         size="middle"
-        scroll={{ x: 1600 }}
+        scroll={{ x: 1400 }}
         onChange={(pagination, _filters, sorter) => {
           // Обновляем страницу из пагинации
           if (pagination.current) {
