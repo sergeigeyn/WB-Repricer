@@ -169,17 +169,14 @@ class WBApiClient(BaseWBClient):
         return sales
 
     async def get_commissions(self) -> dict[str, float]:
-        """Fetch WB commission rates by product category (public API, no auth).
+        """Fetch WB commission rates by product category.
 
         Returns: {subject_name: commission_pct} where commission_pct is
         the FBO marketplace commission (kgvpMarketplace).
         """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(
-                f"{WB_COMMON}/api/v1/tariffs/commission"
-            )
-            response.raise_for_status()
-            data = response.json()
+        data = await self._request(
+            "GET", f"{WB_COMMON}/api/v1/tariffs/commission"
+        )
 
         report = data.get("report", [])
         result: dict[str, float] = {}
@@ -193,20 +190,17 @@ class WBApiClient(BaseWBClient):
         return result
 
     async def get_box_tariffs(self) -> dict[str, Any]:
-        """Fetch box delivery and storage tariffs (public API, no auth).
+        """Fetch box delivery and storage tariffs.
 
         Returns tariff data including base delivery/storage costs and coefficients.
         """
         from datetime import date as date_type
         today = date_type.today().isoformat()
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(
-                f"{WB_COMMON}/api/v1/tariffs/box",
-                params={"date": today},
-            )
-            response.raise_for_status()
-            data = response.json()
+        data = await self._request(
+            "GET", f"{WB_COMMON}/api/v1/tariffs/box",
+            params={"date": today},
+        )
 
         tariffs = data.get("response", {}).get("data", {}).get("warehouseList", [])
         logger.info("Fetched box tariffs for %d warehouses", len(tariffs))
