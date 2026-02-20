@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,22 +31,22 @@ WB_API_ENDPOINTS = {
     "prices": ("GET", "https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=1", None),
     # Statistics (orders, sales, incomes)
     "statistics": ("GET", "https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=2025-01-01", None),
-    # Seller analytics
-    "analytics": ("GET", "https://seller-analytics-api.wildberries.ru/api/v2/nm-report/detail/history?period=day&limit=1", None),
-    # Marketplace (FBO/FBS orders, stocks, warehouses)
-    "marketplace": ("GET", "https://marketplace-api.wildberries.ru/api/v3/orders?limit=1", None),
+    # Seller analytics (v2 nm-report/detail removed; use downloads list)
+    "analytics": ("GET", "https://seller-analytics-api.wildberries.ru/api/v2/nm-report/downloads", None),
+    # Marketplace (FBO/FBS new orders — no required params)
+    "marketplace": ("GET", "https://marketplace-api.wildberries.ru/api/v3/orders/new", None),
     # Advertising / promotions
     "advert": ("GET", "https://advert-api.wildberries.ru/adv/v1/promotion/count", None),
     # Reviews / feedbacks
     "feedbacks": ("GET", "https://feedbacks-api.wildberries.ru/api/v1/feedbacks/count", None),
-    # Questions
-    "questions": ("GET", "https://questions-api.wildberries.ru/api/v1/questions/count", None),
-    # Recommendations
-    "recommendations": ("GET", "https://recommendations-api.wildberries.ru/api/v1/ins/list", None),
-    # Returns
-    "returns": ("GET", "https://returns-api.wildberries.ru/api/v1/returns?limit=1", None),
-    # Common (acceptance coefficients, tariffs)
-    "common": ("GET", "https://common-api.wildberries.ru/api/v1/tariffs/box", None),
+    # Questions (same domain as feedbacks)
+    "questions": ("GET", "https://feedbacks-api.wildberries.ru/api/v1/questions/count-unanswered", None),
+    # Recommendations (domain: recommend-api; requires POST)
+    "recommendations": ("POST", "https://recommend-api.wildberries.ru/api/v1/list", []),
+    # Returns (endpoint: /claims, not /returns)
+    "returns": ("GET", "https://returns-api.wildberries.ru/api/v1/claims", None),
+    # Common (tariffs — date param required, set dynamically)
+    "common": ("GET", None, None),  # URL built dynamically in _check_wb_permissions
 }
 
 
@@ -63,11 +64,17 @@ async def _check_wb_permissions(api_key: str) -> list[str]:
     429, 5xx, timeouts) means no confirmed access for that section.
     """
     permissions = []
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     async with httpx.AsyncClient(timeout=10.0) as client:
         for perm_name, (method, url, body) in WB_API_ENDPOINTS.items():
+            # Build dynamic URLs
+            if perm_name == "common":
+                url = f"https://common-api.wildberries.ru/api/v1/tariffs/box?date={today}"
+            if url is None:
+                continue
             try:
                 kwargs = {"headers": {"Authorization": api_key}}
-                if body and method == "POST":
+                if body is not None and method == "POST":
                     kwargs["json"] = body
                 resp = await client.request(method, url, **kwargs)
                 if resp.status_code in (200, 201):
