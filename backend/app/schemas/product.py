@@ -26,7 +26,8 @@ class ProductResponse(BaseModel):
     commission_pct: float | None = None
     logistics_cost: float | None = None
     storage_cost: float | None = None
-    ad_cost: float | None = None
+    storage_daily: float | None = None
+    ad_pct: float | None = None
     # Calculated metrics
     orders_7d: int = 0
     margin_pct: float | None = None
@@ -42,6 +43,4 @@ class ProductList(BaseModel):
 
 class ProductCostUpdate(BaseModel):
     cost_price: float | None = None
-    ad_cost: float | None = None
-    logistics_cost: float | None = None
-    storage_cost: float | None = None
+    ad_pct: float | None = None

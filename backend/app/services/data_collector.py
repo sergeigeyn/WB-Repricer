@@ -324,6 +324,101 @@ async def sync_tariffs(db: AsyncSession, client: WBApiClient, account_id: int) -
     return updated
 
 
+async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
+    """Sync per-unit logistics and storage costs from WB financial report.
+
+    Fetches reportDetailByPeriod for last 4 weeks and calculates:
+    - logistics_cost: average delivery cost per unit (delivery_rub / delivery_amount)
+    - storage_cost: storage cost per sale (total_storage_fee / sales_count)
+    - storage_daily: total daily storage cost (total_storage_fee / days_in_period)
+    Returns number of products updated.
+    """
+    MSK = timezone(timedelta(hours=3))
+    now_msk = datetime.now(MSK)
+    date_from = (now_msk - timedelta(days=28)).strftime("%Y-%m-%d")
+    date_to = now_msk.strftime("%Y-%m-%d")
+
+    try:
+        rows = await client.get_report_detail(date_from, date_to)
+    except Exception as e:
+        logger.warning("Failed to fetch financial report: %s", e)
+        return 0
+
+    if not rows:
+        logger.info("No financial report data for account %d", account_id)
+        return 0
+
+    # Aggregate by nm_id
+    logistics_total: dict[int, float] = defaultdict(float)   # SUM(delivery_rub)
+    delivery_count: dict[int, int] = defaultdict(int)         # SUM(delivery_amount)
+    storage_total: dict[int, float] = defaultdict(float)      # SUM(storage_fee)
+    sales_count: dict[int, int] = defaultdict(int)            # count of sales
+
+    for row in rows:
+        nm_id = row.get("nm_id")
+        if not nm_id:
+            continue
+
+        delivery_rub = row.get("delivery_rub", 0) or 0
+        delivery_amt = row.get("delivery_amount", 0) or 0
+        storage_fee = row.get("storage_fee", 0) or 0
+        oper_name = row.get("supplier_oper_name", "")
+        quantity = row.get("quantity", 0) or 0
+
+        if delivery_rub > 0:
+            logistics_total[nm_id] += delivery_rub
+        if delivery_amt > 0:
+            delivery_count[nm_id] += delivery_amt
+        if storage_fee > 0:
+            storage_total[nm_id] += storage_fee
+        if oper_name == "Продажа" and quantity > 0:
+            sales_count[nm_id] += quantity
+
+    days_in_period = 28
+
+    # Get products for this account
+    result = await db.execute(
+        select(Product).where(Product.account_id == account_id)
+    )
+    products = list(result.scalars().all())
+    nm_to_product = {p.nm_id: p for p in products}
+
+    updated = 0
+    for nm_id, product in nm_to_product.items():
+        changed = False
+
+        # Logistics per delivery
+        if nm_id in logistics_total and delivery_count.get(nm_id, 0) > 0:
+            new_logistics = round(logistics_total[nm_id] / delivery_count[nm_id], 2)
+            if product.logistics_cost != new_logistics:
+                product.logistics_cost = new_logistics
+                changed = True
+
+        # Storage per sale
+        if nm_id in storage_total and sales_count.get(nm_id, 0) > 0:
+            new_storage_per_sale = round(storage_total[nm_id] / sales_count[nm_id], 2)
+            if product.storage_cost != new_storage_per_sale:
+                product.storage_cost = new_storage_per_sale
+                changed = True
+
+        # Storage daily total
+        if nm_id in storage_total:
+            new_storage_daily = round(storage_total[nm_id] / days_in_period, 2)
+            if product.storage_daily != new_storage_daily:
+                product.storage_daily = new_storage_daily
+                changed = True
+
+        if changed:
+            updated += 1
+
+    await db.flush()
+    logger.info(
+        "Updated financial costs for %d products (account %d, %d report rows)",
+        updated, account_id, len(rows),
+    )
+    return updated
+
+
 async def collect_all() -> dict:
     """Main entry point: collect products, prices and stocks for all active WB accounts.
 
@@ -336,6 +431,7 @@ async def collect_all() -> dict:
         "stocks_updated": 0,
         "orders_synced": 0,
         "commissions_updated": 0,
+        "financial_costs_updated": 0,
         "errors": [],
     }
 
@@ -367,6 +463,9 @@ async def collect_all() -> dict:
                 commissions_count = await sync_tariffs(db, client, account.id)
                 results["commissions_updated"] += commissions_count
 
+                financial_count = await sync_financial_costs(db, client, account.id)
+                results["financial_costs_updated"] += financial_count
+
             except Exception as e:
                 error_msg = f"Account {account.id} ({account.name}): {e}"
                 logger.error("Data collection failed: %s", error_msg)
@@ -375,12 +474,13 @@ async def collect_all() -> dict:
         await db.commit()
 
     logger.info(
-        "Data collection complete: %d accounts, %d products, %d prices, %d stocks, %d orders, %d commissions",
+        "Data collection complete: %d accounts, %d products, %d prices, %d stocks, %d orders, %d commissions, %d financial",
         results["accounts"],
         results["products_synced"],
         results["price_snapshots"],
         results["stocks_updated"],
         results["orders_synced"],
         results["commissions_updated"],
+        results["financial_costs_updated"],
     )
     return results

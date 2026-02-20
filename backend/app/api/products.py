@@ -83,19 +83,21 @@ async def _enrich_with_prices(
         commission_pct = float(p.commission_pct) if p.commission_pct else None
         logistics_cost = float(p.logistics_cost) if p.logistics_cost else None
         storage_cost = float(p.storage_cost) if p.storage_cost else None
-        ad_cost = float(p.ad_cost) if p.ad_cost else None
+        storage_daily = float(p.storage_daily) if p.storage_daily else None
+        ad_pct = float(p.ad_pct) if p.ad_pct else None
 
         # Get account-level settings
         acc_tax, acc_tariff = account_settings.get(p.account_id, (0.0, 0.0))
 
         # Calculate margin with all costs:
-        # margin = final_price - cost_price - tax - commission - tariff_constructor - logistics - storage - ad
+        # margin = final_price - cost_price - tax - commission - tariff - logistics - storage - ad(%)
         margin_pct = None
         margin_rub = None
         if final_price and cost_price and final_price > 0:
             tax_amount = final_price * acc_tax / 100 if acc_tax else 0
             commission_amount = final_price * commission_pct / 100 if commission_pct else 0
             tariff_amount = final_price * acc_tariff / 100 if acc_tariff else 0
+            ad_amount = final_price * ad_pct / 100 if ad_pct else 0
             total_costs = (
                 cost_price
                 + tax_amount
@@ -103,7 +105,7 @@ async def _enrich_with_prices(
                 + tariff_amount
                 + (logistics_cost or 0)
                 + (storage_cost or 0)
-                + (ad_cost or 0)
+                + ad_amount
             )
             margin_rub = round(final_price - total_costs, 2)
             margin_pct = round(margin_rub / final_price * 100, 1)
@@ -128,7 +130,8 @@ async def _enrich_with_prices(
                 commission_pct=commission_pct,
                 logistics_cost=logistics_cost,
                 storage_cost=storage_cost,
-                ad_cost=ad_cost,
+                storage_daily=storage_daily,
+                ad_pct=ad_pct,
                 orders_7d=orders_map.get(p.id, 0),
                 margin_pct=margin_pct,
                 margin_rub=margin_rub,
@@ -150,14 +153,14 @@ async def download_cost_template(
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["Артикул WB", "Артикул", "Название", "Себестоимость", "Реклама ₽"])
+    writer.writerow(["Артикул WB", "Артикул", "Название", "Себестоимость", "Реклама %"])
     for p in products:
         writer.writerow([
             p.nm_id,
             p.vendor_code or "",
             p.title or "",
             float(p.cost_price) if p.cost_price else "",
-            float(p.ad_cost) if p.ad_cost else "",
+            float(p.ad_pct) if p.ad_pct else "",
         ])
 
     # Encode with UTF-8 BOM for correct display in Excel on Windows
@@ -177,7 +180,7 @@ async def import_costs(
 ):
     """Import cost prices from CSV or Excel file.
 
-    CSV format: nm_id;cost_price;tax_rate (semicolon-separated, header row required).
+    CSV format: nm_id;cost_price;ad_pct (semicolon-separated, header row required).
     Excel: .xlsx with same columns.
     """
     filename = file.filename or ""
@@ -222,9 +225,8 @@ async def import_costs(
     header_aliases = {
         "артикул wb": "nm_id", "артикул вб": "nm_id",
         "себестоимость": "cost_price", "себест.": "cost_price", "закупочная": "cost_price",
-        "реклама ₽": "ad_cost", "реклама": "ad_cost", "рекл.": "ad_cost",
-        "логистика ₽": "logistics_cost", "логистика": "logistics_cost",
-        "хранение ₽": "storage_cost", "хранение": "storage_cost",
+        "реклама %": "ad_pct", "реклама": "ad_pct", "рекл.": "ad_pct",
+        "реклама ₽": "ad_pct",  # backwards compat alias
     }
     normalized_rows = []
     for row in rows:
@@ -246,9 +248,7 @@ async def import_costs(
     for i, row in enumerate(rows, start=2):
         nm_id_str = row.get("nm_id", "")
         cost_str = row.get("cost_price", "")
-        ad_str = row.get("ad_cost", "")
-        logistics_str = row.get("logistics_cost", "")
-        storage_str = row.get("storage_cost", "")
+        ad_str = row.get("ad_pct", "")
 
         if not nm_id_str:
             skipped += 1
@@ -274,21 +274,9 @@ async def import_costs(
 
         if ad_str:
             try:
-                product.ad_cost = float(ad_str.replace(",", "."))
+                product.ad_pct = float(ad_str.replace(",", "."))
             except ValueError:
-                errors.append(f"Row {i}: invalid ad_cost '{ad_str}'")
-
-        if logistics_str:
-            try:
-                product.logistics_cost = float(logistics_str.replace(",", "."))
-            except ValueError:
-                errors.append(f"Row {i}: invalid logistics_cost '{logistics_str}'")
-
-        if storage_str:
-            try:
-                product.storage_cost = float(storage_str.replace(",", "."))
-            except ValueError:
-                errors.append(f"Row {i}: invalid storage_cost '{storage_str}'")
+                errors.append(f"Row {i}: invalid ad_pct '{ad_str}'")
 
         updated += 1
 
@@ -307,7 +295,7 @@ async def export_costs(
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["Артикул WB", "Артикул", "Бренд", "Название", "Себестоимость", "Комиссия %", "Логистика ₽", "Хранение ₽", "Реклама ₽", "Остаток"])
+    writer.writerow(["Артикул WB", "Артикул", "Бренд", "Название", "Себестоимость", "Комиссия %", "Логистика ₽", "Хранение ₽/прод", "Хранение ₽/сут", "Реклама %", "Остаток"])
     for p in products:
         writer.writerow([
             p.nm_id,
@@ -318,7 +306,8 @@ async def export_costs(
             float(p.commission_pct) if p.commission_pct else "",
             float(p.logistics_cost) if p.logistics_cost else "",
             float(p.storage_cost) if p.storage_cost else "",
-            float(p.ad_cost) if p.ad_cost else "",
+            float(p.storage_daily) if p.storage_daily else "",
+            float(p.ad_pct) if p.ad_pct else "",
             p.total_stock,
         ])
 
@@ -410,12 +399,8 @@ async def update_product_cost(
 
     if data.cost_price is not None:
         product.cost_price = data.cost_price
-    if data.ad_cost is not None:
-        product.ad_cost = data.ad_cost
-    if data.logistics_cost is not None:
-        product.logistics_cost = data.logistics_cost
-    if data.storage_cost is not None:
-        product.storage_cost = data.storage_cost
+    if data.ad_pct is not None:
+        product.ad_pct = data.ad_pct
 
     enriched = await _enrich_with_prices(db, [product])
     return enriched[0]

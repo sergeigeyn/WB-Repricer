@@ -38,9 +38,10 @@ class Product(Base):
     barcode: Mapped[str | None] = mapped_column(String(50), index=True)
     cost_price: Mapped[float | None] = mapped_column(Numeric(12, 2))
     commission_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))  # WB commission %
-    logistics_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Logistics ₽ per unit
-    storage_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Storage ₽ per unit
-    ad_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Advertising ₽ per unit
+    logistics_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Logistics ₽ per delivery (auto from WB)
+    storage_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Storage ₽ per sale (auto from WB)
+    storage_daily: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Storage ₽ total per day (auto from WB)
+    ad_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))  # Advertising % of revenue
     extra_costs_json: Mapped[str | None] = mapped_column(Text)  # JSON
     total_stock: Mapped[int] = mapped_column(default=0)
     is_active: Mapped[bool] = mapped_column(default=True)

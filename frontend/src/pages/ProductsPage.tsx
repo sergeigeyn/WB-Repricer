@@ -40,7 +40,8 @@ interface Product {
   commission_pct: number | null;
   logistics_cost: number | null;
   storage_cost: number | null;
-  ad_cost: number | null;
+  storage_daily: number | null;
+  ad_pct: number | null;
   total_stock: number;
   orders_7d: number;
   margin_pct: number | null;
@@ -304,44 +305,55 @@ export default function ProductsPage() {
       width: 90,
       align: 'right',
       render: (val: number | null) => {
-        if (val === null || val === undefined) return '—';
-        return `${val} ₽`;
+        if (val === null || val === undefined) return <Typography.Text type="secondary">—</Typography.Text>;
+        return <Typography.Text>{val} ₽</Typography.Text>;
       },
     },
     {
-      title: 'Хран.',
-      dataIndex: 'storage_cost',
-      key: 'storage_cost',
-      width: 80,
+      title: 'Хранение',
+      key: 'storage',
+      width: 110,
       align: 'right',
-      render: (val: number | null) => {
-        if (val === null || val === undefined) return '—';
-        return `${val} ₽`;
+      render: (_: unknown, record: Product) => {
+        const daily = record.storage_daily;
+        const perSale = record.storage_cost;
+        if (daily === null && perSale === null) return <Typography.Text type="secondary">—</Typography.Text>;
+        return (
+          <div>
+            {daily !== null && (
+              <div style={{ fontSize: 11, color: '#888' }}>{daily} ₽/сут</div>
+            )}
+            {perSale !== null && (
+              <div style={{ fontWeight: 500 }}>{perSale} ₽/прод</div>
+            )}
+          </div>
+        );
       },
     },
     {
-      title: 'Реклама',
-      dataIndex: 'ad_cost',
-      key: 'ad_cost',
-      width: 100,
+      title: 'Рекл. %',
+      dataIndex: 'ad_pct',
+      key: 'ad_pct',
+      width: 90,
       align: 'center',
       render: (_: number | null, record: Product) => (
         <InputNumber
           size="small"
           min={0}
-          step={1}
+          max={100}
+          step={0.5}
           placeholder="0"
-          value={record.ad_cost}
+          value={record.ad_pct}
           onBlur={(e) => {
             const val = e.target.value ? parseFloat(e.target.value) : null;
-            if (val !== record.ad_cost) handleUpdateCost(record.id, 'ad_cost', val);
+            if (val !== record.ad_pct) handleUpdateCost(record.id, 'ad_pct', val);
           }}
           onPressEnter={(e) => {
             const val = (e.target as HTMLInputElement).value ? parseFloat((e.target as HTMLInputElement).value) : null;
-            if (val !== record.ad_cost) handleUpdateCost(record.id, 'ad_cost', val);
+            if (val !== record.ad_pct) handleUpdateCost(record.id, 'ad_pct', val);
           }}
-          style={{ width: 70 }}
-          suffix="₽"
+          style={{ width: 60 }}
+          suffix="%"
         />
       ),
     },

@@ -168,6 +168,41 @@ class WBApiClient(BaseWBClient):
         logger.info("Fetched %d sales from WB", len(sales))
         return sales
 
+    async def get_report_detail(self, date_from: str, date_to: str) -> list[dict[str, Any]]:
+        """Fetch detailed financial report (reportDetailByPeriod) via Statistics API v5.
+
+        Includes delivery_rub, storage_fee, commission per operation.
+        Uses rrdid-based pagination (up to 100K rows per page).
+
+        Args:
+            date_from: Start date YYYY-MM-DD
+            date_to: End date YYYY-MM-DD
+
+        Returns: list of report rows (each row is a dict with nm_id, delivery_rub, etc.)
+        """
+        all_rows: list[dict[str, Any]] = []
+        rrdid = 0
+
+        while True:
+            data = await self._request(
+                "GET",
+                f"{WB_STATISTICS}/api/v5/supplier/reportDetailByPeriod",
+                params={
+                    "dateFrom": date_from,
+                    "dateTo": date_to,
+                    "limit": 100000,
+                    "rrdid": rrdid,
+                },
+            )
+            rows = data if isinstance(data, list) else []
+            if not rows:
+                break
+            all_rows.extend(rows)
+            rrdid = rows[-1].get("rrd_id", 0)
+
+        logger.info("Fetched %d report rows from WB (period %s — %s)", len(all_rows), date_from, date_to)
+        return all_rows
+
     async def get_commissions(self) -> dict[str, float]:
         """Fetch WB commission rates by product category.
 
