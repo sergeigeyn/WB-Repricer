@@ -297,6 +297,7 @@ export default function ProductsPage() {
     // --- Наличие ---
     {
       title: 'Наличие',
+      key: 'group_stock',
       children: [
         {
           title: 'Остаток',
@@ -328,6 +329,7 @@ export default function ProductsPage() {
     // --- Цены и скидки ---
     {
       title: 'Цены и скидки',
+      key: 'group_prices',
       children: [
         {
           title: 'До скидки',
@@ -388,6 +390,7 @@ export default function ProductsPage() {
     // --- Расходы ---
     {
       title: 'Расходы',
+      key: 'group_costs',
       children: [
         {
           title: 'Себест.',
@@ -491,6 +494,7 @@ export default function ProductsPage() {
     // --- Результат ---
     {
       title: 'Результат',
+      key: 'group_result',
       children: [
         {
           title: 'Маржа',
