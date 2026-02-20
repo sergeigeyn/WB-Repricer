@@ -39,10 +39,14 @@ async def _enrich_with_prices(
     result = await db.execute(latest_prices_q)
     snapshots = {s.product_id: s for s in result.scalars().all()}
 
-    # Get orders count for last 7 days per product
+    # Get orders and returns for last 7 days per product (net orders = orders - returns)
     seven_days_ago = (datetime.now(UTC) - timedelta(days=7)).date()
     orders_q = (
-        select(SalesDaily.product_id, func.sum(SalesDaily.orders_count))
+        select(
+            SalesDaily.product_id,
+            func.sum(SalesDaily.orders_count),
+            func.sum(SalesDaily.returns_count),
+        )
         .where(
             SalesDaily.product_id.in_(product_ids),
             SalesDaily.date >= seven_days_ago,
@@ -50,7 +54,10 @@ async def _enrich_with_prices(
         .group_by(SalesDaily.product_id)
     )
     orders_result = await db.execute(orders_q)
-    orders_map = {row[0]: row[1] or 0 for row in orders_result.all()}
+    orders_map = {
+        row[0]: max((row[1] or 0) - (row[2] or 0), 0)
+        for row in orders_result.all()
+    }
 
     items = []
     for p in products:

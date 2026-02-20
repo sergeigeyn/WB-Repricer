@@ -182,22 +182,12 @@ async def sync_stocks(db: AsyncSession, client: WBApiClient, account_id: int) ->
 
 
 async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
-    """Sync orders from WB Statistics API into SalesDaily.
+    """Sync orders and returns from WB Statistics API into SalesDaily.
 
-    Fetches last 7 days of orders, aggregates by (nm_id, date), upserts into sales_daily.
-    Returns number of daily records upserted.
+    Fetches last 7 days of orders and sales (returns), aggregates by (nm_id, date),
+    upserts into sales_daily. Returns number of daily records upserted.
     """
     date_from = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00")
-
-    try:
-        orders = await client.get_orders(date_from)
-    except Exception as e:
-        logger.warning("Failed to fetch orders: %s", e)
-        return 0
-
-    if not orders:
-        logger.info("No orders from WB for account %d", account_id)
-        return 0
 
     # Build nm_id → product_id map
     result = await db.execute(
@@ -205,19 +195,21 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
     )
     product_map = {row.nm_id: row.id for row in result.all()}
 
-    # Aggregate orders by (nm_id, date), excluding cancelled orders
-    daily_counts: dict[tuple[int, date], int] = defaultdict(int)
-    skipped_cancelled = 0
-    for order in orders:
-        # Skip cancelled orders
-        if order.get("isCancel"):
-            skipped_cancelled += 1
-            continue
+    # --- Fetch orders ---
+    try:
+        orders = await client.get_orders(date_from)
+    except Exception as e:
+        logger.warning("Failed to fetch orders: %s", e)
+        orders = []
 
+    # Aggregate orders by (nm_id, date), excluding cancelled
+    daily_orders: dict[tuple[int, date], int] = defaultdict(int)
+    for order in orders:
+        if order.get("isCancel"):
+            continue
         nm_id = order.get("nmId")
         if not nm_id or nm_id not in product_map:
             continue
-        # Parse date from order (format: "2026-02-15T10:30:00")
         order_date_str = order.get("date", "")
         if not order_date_str:
             continue
@@ -225,15 +217,41 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
             order_date = datetime.fromisoformat(order_date_str.replace("Z", "+00:00")).date()
         except (ValueError, AttributeError):
             continue
-        daily_counts[(nm_id, order_date)] += 1
+        daily_orders[(nm_id, order_date)] += 1
 
-    if skipped_cancelled:
-        logger.info("Skipped %d cancelled orders for account %d", skipped_cancelled, account_id)
+    # --- Fetch sales/returns ---
+    try:
+        sales = await client.get_sales(date_from)
+    except Exception as e:
+        logger.warning("Failed to fetch sales: %s", e)
+        sales = []
 
-    # Upsert into sales_daily
+    # Count returns by (nm_id, date)
+    daily_returns: dict[tuple[int, date], int] = defaultdict(int)
+    for sale in sales:
+        if not sale.get("isReturn"):
+            continue
+        nm_id = sale.get("nmId")
+        if not nm_id or nm_id not in product_map:
+            continue
+        sale_date_str = sale.get("date", "")
+        if not sale_date_str:
+            continue
+        try:
+            sale_date = datetime.fromisoformat(sale_date_str.replace("Z", "+00:00")).date()
+        except (ValueError, AttributeError):
+            continue
+        daily_returns[(nm_id, sale_date)] += 1
+
+    # --- Upsert into sales_daily ---
+    all_keys = set(daily_orders.keys()) | set(daily_returns.keys())
     upserted = 0
-    for (nm_id, order_date), count in daily_counts.items():
+    for key in all_keys:
+        nm_id, order_date = key
         product_id = product_map[nm_id]
+        orders_count = daily_orders.get(key, 0)
+        returns_count = daily_returns.get(key, 0)
+
         result = await db.execute(
             select(SalesDaily).where(
                 SalesDaily.product_id == product_id,
@@ -242,17 +260,22 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
         )
         existing = result.scalar_one_or_none()
         if existing:
-            existing.orders_count = count
+            existing.orders_count = orders_count
+            existing.returns_count = returns_count
         else:
             db.add(SalesDaily(
                 product_id=product_id,
                 date=order_date,
-                orders_count=count,
+                orders_count=orders_count,
+                returns_count=returns_count,
             ))
         upserted += 1
 
     await db.flush()
-    logger.info("Upserted %d daily order records for account %d", upserted, account_id)
+    logger.info(
+        "Upserted %d daily records for account %d (orders from %d items, returns from %d items)",
+        upserted, account_id, len(orders), len(sales),
+    )
     return upserted
 
 
