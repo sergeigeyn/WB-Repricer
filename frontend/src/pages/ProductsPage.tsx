@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Table,
   Typography,
@@ -56,12 +57,13 @@ interface ImportResult {
 }
 
 export default function ProductsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [search, setSearch] = useState('');
-  const [inStock, setInStock] = useState(false);
+  const [inStock, setInStock] = useState(searchParams.get('in_stock') === 'true');
   const [page, setPage] = useState(1);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<string | null>(null);
@@ -402,6 +404,7 @@ export default function ProductsPage() {
             onChange={(checked) => {
               setInStock(checked);
               setPage(1);
+              setSearchParams(checked ? { in_stock: 'true' } : {}, { replace: true });
             }}
             checkedChildren="В наличии"
             unCheckedChildren="Все"

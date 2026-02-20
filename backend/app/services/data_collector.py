@@ -349,6 +349,7 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
         return 0
 
     # Aggregate by nm_id
+    seen_in_report: set[int] = set()                          # nm_ids with any report data
     logistics_total: dict[int, float] = defaultdict(float)   # SUM(delivery_rub)
     delivery_count: dict[int, int] = defaultdict(int)         # SUM(delivery_amount)
     storage_total: dict[int, float] = defaultdict(float)      # SUM(storage_fee)
@@ -358,6 +359,8 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
         nm_id = row.get("nm_id")
         if not nm_id:
             continue
+
+        seen_in_report.add(nm_id)
 
         delivery_rub = row.get("delivery_rub", 0) or 0
         delivery_amt = row.get("delivery_amount", 0) or 0
@@ -369,8 +372,8 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
             logistics_total[nm_id] += delivery_rub
         if delivery_amt > 0:
             delivery_count[nm_id] += delivery_amt
-        if storage_fee > 0:
-            storage_total[nm_id] += storage_fee
+        # Always accumulate storage (even 0) — free storage should show 0, not NULL
+        storage_total[nm_id] += storage_fee
         if oper_name == "Продажа" and quantity > 0:
             sales_count[nm_id] += quantity
 
@@ -385,6 +388,8 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
 
     updated = 0
     for nm_id, product in nm_to_product.items():
+        if nm_id not in seen_in_report:
+            continue
         changed = False
 
         # Logistics per delivery
@@ -394,19 +399,19 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
                 product.logistics_cost = new_logistics
                 changed = True
 
-        # Storage per sale
-        if nm_id in storage_total and sales_count.get(nm_id, 0) > 0:
-            new_storage_per_sale = round(storage_total[nm_id] / sales_count[nm_id], 2)
-            if product.storage_cost != new_storage_per_sale:
-                product.storage_cost = new_storage_per_sale
-                changed = True
+        # Storage per sale (0 if free storage or no sales)
+        total_storage = storage_total.get(nm_id, 0)
+        sales = sales_count.get(nm_id, 0)
+        new_storage_per_sale = round(total_storage / sales, 2) if sales > 0 else 0.0
+        if product.storage_cost != new_storage_per_sale:
+            product.storage_cost = new_storage_per_sale
+            changed = True
 
-        # Storage daily total
-        if nm_id in storage_total:
-            new_storage_daily = round(storage_total[nm_id] / days_in_period, 2)
-            if product.storage_daily != new_storage_daily:
-                product.storage_daily = new_storage_daily
-                changed = True
+        # Storage daily total (0 if free storage)
+        new_storage_daily = round(total_storage / days_in_period, 2)
+        if product.storage_daily != new_storage_daily:
+            product.storage_daily = new_storage_daily
+            changed = True
 
         if changed:
             updated += 1
