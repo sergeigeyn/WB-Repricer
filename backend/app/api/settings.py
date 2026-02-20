@@ -1,5 +1,6 @@
 """Settings endpoints: WB accounts, API key management."""
 
+import json
 import logging
 
 import httpx
@@ -26,7 +27,7 @@ WB_API_ENDPOINTS = {
     # Product cards
     "content": ("POST", "https://content-api.wildberries.ru/content/v2/get/cards/list", {"settings": {"cursor": {"limit": 1}, "filter": {"withPhoto": -1}}}),
     # Prices & discounts
-    "prices": ("GET", "https://discounts-prices-api.wb.ru/api/v2/list/goods/filter?limit=1", None),
+    "prices": ("GET", "https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=1", None),
     # Statistics (orders, sales, incomes)
     "statistics": ("GET", "https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=2025-01-01", None),
     # Seller analytics
@@ -116,6 +117,7 @@ async def create_wb_account(
         api_key_encrypted=encrypt_api_key(data.api_key),
         user_id=current_user.id,
         is_active=True,
+        permissions_json=json.dumps(permissions) if permissions else None,
     )
     db.add(account)
     await db.flush()
@@ -152,13 +154,20 @@ async def list_wb_accounts(
         except Exception:
             masked = "***invalid***"
 
+        perms = None
+        if acc.permissions_json:
+            try:
+                perms = json.loads(acc.permissions_json)
+            except (json.JSONDecodeError, TypeError):
+                perms = None
+
         items.append(WBAccountResponse(
             id=acc.id,
             name=acc.name,
             api_key_masked=masked,
             user_id=acc.user_id,
             is_active=acc.is_active,
-            permissions=None,
+            permissions=perms,
             created_at=acc.created_at,
         ))
 
@@ -210,10 +219,14 @@ async def check_account_permissions(
         return WBKeyValidationResult(valid=False, permissions=[], error=str(e))
 
     if not permissions:
+        account.permissions_json = None
+        await db.flush()
         return WBKeyValidationResult(
             valid=False,
             permissions=[],
             error="API ключ больше не действителен",
         )
 
+    account.permissions_json = json.dumps(permissions)
+    await db.flush()
     return WBKeyValidationResult(valid=True, permissions=permissions)

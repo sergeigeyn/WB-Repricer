@@ -16,6 +16,7 @@ class WBAccount(Base):
     api_key_encrypted: Mapped[str] = mapped_column(Text)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
+    permissions_json: Mapped[str | None] = mapped_column(Text)  # JSON list of permissions
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
