@@ -2,8 +2,6 @@
 
 import json
 import logging
-from datetime import UTC, datetime
-
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
@@ -45,8 +43,7 @@ WB_API_ENDPOINTS = {
     "recommendations": ("POST", "https://recommend-api.wildberries.ru/api/v1/list", []),
     # Returns (endpoint: /claims, not /returns)
     "returns": ("GET", "https://returns-api.wildberries.ru/api/v1/claims", None),
-    # Common (tariffs — date param required, set dynamically)
-    "common": ("GET", None, None),  # URL built dynamically in _check_wb_permissions
+    # NOTE: common-api (tariffs) excluded — it's public, always 200 without auth.
 }
 
 
@@ -64,14 +61,8 @@ async def _check_wb_permissions(api_key: str) -> list[str]:
     429, 5xx, timeouts) means no confirmed access for that section.
     """
     permissions = []
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
     async with httpx.AsyncClient(timeout=10.0) as client:
         for perm_name, (method, url, body) in WB_API_ENDPOINTS.items():
-            # Build dynamic URLs
-            if perm_name == "common":
-                url = f"https://common-api.wildberries.ru/api/v1/tariffs/box?date={today}"
-            if url is None:
-                continue
             try:
                 kwargs = {"headers": {"Authorization": api_key}}
                 if body is not None and method == "POST":
