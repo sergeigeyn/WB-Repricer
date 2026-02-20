@@ -167,11 +167,11 @@ export default function ProductsPage() {
     },
   };
 
-  const handleUpdateAdCost = async (productId: number, value: number | null) => {
+  const handleUpdateCost = async (productId: number, field: string, value: number | null) => {
     try {
-      await apiClient.put(`/products/${productId}/cost`, { ad_cost: value });
+      const { data } = await apiClient.put(`/products/${productId}/cost`, { [field]: value });
       setProducts((prev) =>
-        prev.map((p) => (p.id === productId ? { ...p, ad_cost: value } : p))
+        prev.map((p) => (p.id === productId ? { ...p, ...data } : p))
       );
     } catch {
       message.error('Ошибка сохранения');
@@ -334,11 +334,11 @@ export default function ProductsPage() {
           value={record.ad_cost}
           onBlur={(e) => {
             const val = e.target.value ? parseFloat(e.target.value) : null;
-            if (val !== record.ad_cost) handleUpdateAdCost(record.id, val);
+            if (val !== record.ad_cost) handleUpdateCost(record.id, 'ad_cost', val);
           }}
           onPressEnter={(e) => {
             const val = (e.target as HTMLInputElement).value ? parseFloat((e.target as HTMLInputElement).value) : null;
-            if (val !== record.ad_cost) handleUpdateAdCost(record.id, val);
+            if (val !== record.ad_cost) handleUpdateCost(record.id, 'ad_cost', val);
           }}
           style={{ width: 70 }}
           suffix="₽"
