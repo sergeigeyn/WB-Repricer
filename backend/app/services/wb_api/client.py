@@ -1,15 +1,27 @@
 """WB API client abstraction layer.
 
-If WB changes their API, only this file needs to be updated.
-Supports mock mode for development without a real API key.
+WB uses different domains per API section:
+- content-api.wildberries.ru — product cards
+- discounts-prices-api.wildberries.ru — prices & discounts
+- statistics-api.wildberries.ru — orders & sales history
+- marketplace-api.wildberries.ru — FBO/FBS orders, stocks, warehouses
+- advert-api.wildberries.ru — advertising campaigns
 """
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
 
-from app.core.config import settings
+logger = logging.getLogger(__name__)
+
+# WB API domain mapping
+WB_CONTENT = "https://content-api.wildberries.ru"
+WB_PRICES = "https://discounts-prices-api.wildberries.ru"
+WB_STATISTICS = "https://statistics-api.wildberries.ru"
+WB_MARKETPLACE = "https://marketplace-api.wildberries.ru"
+WB_ADVERT = "https://advert-api.wildberries.ru"
 
 
 class BaseWBClient(ABC):
@@ -20,95 +32,99 @@ class BaseWBClient(ABC):
         """Get list of products from WB cabinet."""
 
     @abstractmethod
-    async def get_prices(self) -> list[dict[str, Any]]:
-        """Get current prices."""
+    async def get_prices(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Get current prices and discounts."""
 
     @abstractmethod
-    async def set_prices(self, prices: list[dict[str, Any]]) -> dict[str, Any]:
-        """Set prices for products."""
+    async def get_orders(self, date_from: str) -> list[dict[str, Any]]:
+        """Get orders from date."""
 
     @abstractmethod
-    async def get_stocks(self) -> list[dict[str, Any]]:
-        """Get warehouse stock levels."""
-
-    @abstractmethod
-    async def get_orders(self, date_from: str, date_to: str) -> list[dict[str, Any]]:
-        """Get orders for date range."""
-
-    @abstractmethod
-    async def get_sales(self, date_from: str, date_to: str) -> list[dict[str, Any]]:
-        """Get sales for date range."""
-
-    @abstractmethod
-    async def get_promotions(self) -> list[dict[str, Any]]:
-        """Get available promotions."""
-
-    @abstractmethod
-    async def get_commissions(self) -> list[dict[str, Any]]:
-        """Get WB commission rates."""
+    async def get_sales(self, date_from: str) -> list[dict[str, Any]]:
+        """Get sales from date."""
 
 
 class WBApiClient(BaseWBClient):
-    """Real WB API client using HTTP requests."""
+    """Real WB API client using per-domain HTTP requests."""
 
-    def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or settings.WB_API_KEY
-        self.base_url = settings.WB_API_BASE_URL
-        self.headers = {"Authorization": self.api_key}
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.headers = {"Authorization": api_key}
         self.timeout = 30.0
 
     async def _request(self, method: str, url: str, **kwargs) -> Any:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.request(
-                method, f"{self.base_url}{url}", headers=self.headers, **kwargs
+                method, url, headers=self.headers, **kwargs
             )
             response.raise_for_status()
             return response.json()
 
     async def get_products(self) -> list[dict[str, Any]]:
-        # WB Content API: /content/v2/get/cards/list
+        """Fetch all product cards via Content API with cursor pagination."""
+        all_cards: list[dict[str, Any]] = []
+        cursor: dict[str, Any] = {"limit": 100, "updatedAt": "", "nmID": 0}
+
+        while True:
+            data = await self._request(
+                "POST",
+                f"{WB_CONTENT}/content/v2/get/cards/list",
+                json={
+                    "settings": {
+                        "cursor": cursor,
+                        "filter": {"withPhoto": -1},
+                    }
+                },
+            )
+            cards = data.get("cards", [])
+            all_cards.extend(cards)
+
+            new_cursor = data.get("cursor", {})
+            total = new_cursor.get("total", 0)
+            if not cards or len(all_cards) >= total:
+                break
+            cursor["updatedAt"] = new_cursor.get("updatedAt", "")
+            cursor["nmID"] = new_cursor.get("nmID", 0)
+
+        logger.info("Fetched %d product cards from WB", len(all_cards))
+        return all_cards
+
+    async def get_prices(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Fetch prices via Discounts-Prices API with pagination."""
+        all_goods: list[dict[str, Any]] = []
+        offset = 0
+
+        while True:
+            data = await self._request(
+                "GET",
+                f"{WB_PRICES}/api/v2/list/goods/filter?limit={limit}&offset={offset}",
+            )
+            goods = data.get("data", {}).get("listGoods", [])
+            all_goods.extend(goods)
+
+            if len(goods) < limit:
+                break
+            offset += limit
+
+        logger.info("Fetched prices for %d goods from WB", len(all_goods))
+        return all_goods
+
+    async def get_orders(self, date_from: str) -> list[dict[str, Any]]:
+        """Fetch orders via Statistics API."""
         data = await self._request(
-            "POST",
-            "/content/v2/get/cards/list",
-            json={"settings": {"cursor": {"limit": 1000}, "filter": {"withPhoto": -1}}},
+            "GET",
+            f"{WB_STATISTICS}/api/v1/supplier/orders?dateFrom={date_from}",
         )
-        return data.get("cards", [])
+        orders = data if isinstance(data, list) else []
+        logger.info("Fetched %d orders from WB", len(orders))
+        return orders
 
-    async def get_prices(self) -> list[dict[str, Any]]:
-        data = await self._request("GET", "/public/api/v1/info")
-        return data if isinstance(data, list) else []
-
-    async def set_prices(self, prices: list[dict[str, Any]]) -> dict[str, Any]:
-        return await self._request("POST", "/public/api/v1/prices", json=prices)
-
-    async def get_stocks(self) -> list[dict[str, Any]]:
-        data = await self._request("GET", "/api/v3/stocks/0")
-        return data.get("stocks", [])
-
-    async def get_orders(self, date_from: str, date_to: str) -> list[dict[str, Any]]:
+    async def get_sales(self, date_from: str) -> list[dict[str, Any]]:
+        """Fetch sales via Statistics API."""
         data = await self._request(
-            "GET", f"/api/v1/supplier/orders?dateFrom={date_from}&dateTo={date_to}"
+            "GET",
+            f"{WB_STATISTICS}/api/v1/supplier/sales?dateFrom={date_from}",
         )
-        return data if isinstance(data, list) else []
-
-    async def get_sales(self, date_from: str, date_to: str) -> list[dict[str, Any]]:
-        data = await self._request(
-            "GET", f"/api/v1/supplier/sales?dateFrom={date_from}&dateTo={date_to}"
-        )
-        return data if isinstance(data, list) else []
-
-    async def get_promotions(self) -> list[dict[str, Any]]:
-        data = await self._request("GET", "/adv/v1/promotion/list")
-        return data if isinstance(data, list) else []
-
-    async def get_commissions(self) -> list[dict[str, Any]]:
-        data = await self._request("GET", "/api/v1/supplier/commissions")
-        return data if isinstance(data, list) else []
-
-
-def get_wb_client() -> BaseWBClient:
-    """Factory: return mock or real client based on config."""
-    if settings.WB_API_MOCK_MODE:
-        from app.services.wb_api.mock_client import MockWBClient
-        return MockWBClient()
-    return WBApiClient()
+        sales = data if isinstance(data, list) else []
+        logger.info("Fetched %d sales from WB", len(sales))
+        return sales
