@@ -18,6 +18,10 @@ class ProductResponse(BaseModel):
     is_active: bool
     is_locomotive: bool
     created_at: datetime
+    # Price data (from latest snapshot)
+    current_price: float | None = None
+    discount_pct: float | None = None
+    final_price: float | None = None
 
     model_config = {"from_attributes": True}
 
