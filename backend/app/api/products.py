@@ -79,12 +79,12 @@ async def _enrich_with_prices(
     for p in products:
         snap = snapshots.get(p.id)
         final_price = float(snap.final_price) if snap and snap.final_price else None
-        cost_price = float(p.cost_price) if p.cost_price else None
-        commission_pct = float(p.commission_pct) if p.commission_pct else None
-        logistics_cost = float(p.logistics_cost) if p.logistics_cost else None
-        storage_cost = float(p.storage_cost) if p.storage_cost else None
-        storage_daily = float(p.storage_daily) if p.storage_daily else None
-        ad_pct = float(p.ad_pct) if p.ad_pct else None
+        cost_price = float(p.cost_price) if p.cost_price is not None else None
+        commission_pct = float(p.commission_pct) if p.commission_pct is not None else None
+        logistics_cost = float(p.logistics_cost) if p.logistics_cost is not None else None
+        storage_cost = float(p.storage_cost) if p.storage_cost is not None else None
+        storage_daily = float(p.storage_daily) if p.storage_daily is not None else None
+        ad_pct = float(p.ad_pct) if p.ad_pct is not None else None
 
         # Get account-level settings
         acc_tax, acc_tariff = account_settings.get(p.account_id, (0.0, 0.0))
