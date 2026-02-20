@@ -8,6 +8,7 @@ WB uses different domains per API section:
 - advert-api.wildberries.ru — advertising campaigns
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
@@ -238,21 +239,57 @@ class WBApiClient(BaseWBClient):
         logger.info("Fetched commission rates for %d categories", len(result))
         return result
 
-    async def get_paid_storage(self, date_from: str) -> list[dict[str, Any]]:
-        """Fetch paid storage data per product per warehouse per day.
+    async def get_paid_storage(self, date_from: str, date_to: str) -> list[dict[str, Any]]:
+        """Fetch paid storage data via async task-based API.
 
-        Returns list of storage entries with nmId, warehousePrice, storagePricePerBarcode, etc.
-        Uses Seller Analytics API /api/v1/paid_storage.
+        WB paid storage API works in 3 steps:
+        1. Create task (GET /api/v1/paid_storage?dateFrom=...&dateTo=...) → taskId
+        2. Poll status (GET /api/v1/paid_storage/tasks/{taskId}/status) until "done"
+        3. Download results (GET /api/v1/paid_storage/tasks/{taskId}/download)
+
+        Max period: 8 days per request.
+
+        Returns list of storage entries with nmId, warehousePrice, etc.
         """
-        data = await self._request_with_timeout(
-            60.0,
+        # Step 1: Create task
+        data = await self._request(
             "GET",
             f"{WB_ANALYTICS}/api/v1/paid_storage",
-            params={"dateFrom": date_from},
+            params={"dateFrom": date_from, "dateTo": date_to},
         )
-        items = data if isinstance(data, list) else []
-        logger.info("Fetched %d paid storage entries from WB", len(items))
-        return items
+        task_id = data.get("data", {}).get("taskId") if isinstance(data, dict) else None
+        if not task_id:
+            logger.warning("Paid storage: no taskId returned, response: %s", data)
+            return []
+
+        logger.info("Paid storage task created: %s (period %s — %s)", task_id, date_from, date_to)
+
+        # Step 2: Poll status (max ~2 minutes, check every 10 seconds)
+        for _ in range(12):
+            await asyncio.sleep(10)
+            status_data = await self._request(
+                "GET",
+                f"{WB_ANALYTICS}/api/v1/paid_storage/tasks/{task_id}/status",
+            )
+            status = status_data.get("data", {}).get("status", "") if isinstance(status_data, dict) else ""
+            if status == "done":
+                break
+            if status in ("canceled", "purged"):
+                logger.warning("Paid storage task %s has status: %s", task_id, status)
+                return []
+        else:
+            logger.warning("Paid storage task %s timed out waiting for completion", task_id)
+            return []
+
+        # Step 3: Download results
+        items = await self._request_with_timeout(
+            120.0,
+            "GET",
+            f"{WB_ANALYTICS}/api/v1/paid_storage/tasks/{task_id}/download",
+        )
+        result = items if isinstance(items, list) else []
+        logger.info("Fetched %d paid storage entries from WB (period %s — %s)", len(result), date_from, date_to)
+        return result
 
     async def get_box_tariffs(self) -> dict[str, Any]:
         """Fetch box delivery and storage tariffs.

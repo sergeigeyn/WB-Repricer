@@ -414,21 +414,31 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
 async def sync_paid_storage(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
     """Sync per-product storage costs from WB paid storage API.
 
-    Uses /api/v1/paid/storage to get per-product daily storage costs.
+    Uses task-based /api/v1/paid_storage (max 8 days per request).
+    Fetches last 28 days in 8-day chunks.
     Calculates:
     - storage_daily: average daily storage cost (SUM(warehousePrice) / days_in_period)
-    - storage_cost: storage per sale (SUM(warehousePrice) / sales_count from financial data)
+    - storage_cost: storage per unit (SUM(warehousePrice) / total_stock)
     Returns number of products updated.
     """
     MSK = timezone(timedelta(hours=3))
     now_msk = datetime.now(MSK)
-    date_from = (now_msk - timedelta(days=28)).strftime("%Y-%m-%d")
+    period_days = 28
+    chunk_days = 8
 
-    try:
-        entries = await client.get_paid_storage(date_from)
-    except Exception as e:
-        logger.warning("Failed to fetch paid storage: %s", e)
-        return 0
+    # Fetch in 8-day chunks (WB max period per request)
+    entries: list[dict] = []
+    chunk_start = now_msk - timedelta(days=period_days)
+    while chunk_start < now_msk:
+        chunk_end = min(chunk_start + timedelta(days=chunk_days), now_msk)
+        date_from = chunk_start.strftime("%Y-%m-%d")
+        date_to = chunk_end.strftime("%Y-%m-%d")
+        try:
+            chunk_entries = await client.get_paid_storage(date_from, date_to)
+            entries.extend(chunk_entries)
+        except Exception as e:
+            logger.warning("Failed to fetch paid storage for %s — %s: %s", date_from, date_to, e)
+        chunk_start = chunk_end
 
     if not entries:
         logger.info("No paid storage data for account %d", account_id)
@@ -443,7 +453,7 @@ async def sync_paid_storage(db: AsyncSession, client: WBApiClient, account_id: i
         price = entry.get("warehousePrice", 0) or 0
         storage_by_nm[nm_id] += price
 
-    days_in_period = 28
+    days_in_period = period_days
 
     # Get products for this account
     result = await db.execute(
