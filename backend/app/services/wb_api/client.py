@@ -53,12 +53,24 @@ class WBApiClient(BaseWBClient):
         self.headers = {"Authorization": api_key}
         self.timeout = 30.0
 
+    async def _request_with_timeout(self, timeout: float, method: str, url: str, **kwargs) -> Any:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.request(
+                method, url, headers=self.headers, **kwargs
+            )
+            response.raise_for_status()
+            if response.status_code == 204 or not response.content:
+                return []
+            return response.json()
+
     async def _request(self, method: str, url: str, **kwargs) -> Any:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.request(
                 method, url, headers=self.headers, **kwargs
             )
             response.raise_for_status()
+            if response.status_code == 204 or not response.content:
+                return []
             return response.json()
 
     async def get_products(self) -> list[dict[str, Any]]:
@@ -184,7 +196,8 @@ class WBApiClient(BaseWBClient):
         rrdid = 0
 
         while True:
-            data = await self._request(
+            data = await self._request_with_timeout(
+                60.0,
                 "GET",
                 f"{WB_STATISTICS}/api/v5/supplier/reportDetailByPeriod",
                 params={
