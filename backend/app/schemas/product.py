@@ -5,6 +5,12 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class ExtraCostItem(BaseModel):
+    name: str
+    value: float
+    type: str = "fixed"  # fixed = ₽ per unit
+
+
 class ProductResponse(BaseModel):
     id: int
     nm_id: int
@@ -22,12 +28,17 @@ class ProductResponse(BaseModel):
     current_price: float | None = None
     discount_pct: float | None = None
     final_price: float | None = None
+    # SPP (informational, paid by WB, but affects tax base)
+    spp_pct: float | None = None
+    spp_price: float | None = None
     # Unit economics
     commission_pct: float | None = None
     logistics_cost: float | None = None
     storage_cost: float | None = None
     storage_daily: float | None = None
     ad_pct: float | None = None
+    extra_costs: list[ExtraCostItem] | None = None
+    extra_costs_total: float | None = None
     # Calculated metrics
     orders_7d: int = 0
     margin_pct: float | None = None
@@ -44,3 +55,4 @@ class ProductList(BaseModel):
 class ProductCostUpdate(BaseModel):
     cost_price: float | None = None
     ad_pct: float | None = None
+    extra_costs: list[ExtraCostItem] | None = None

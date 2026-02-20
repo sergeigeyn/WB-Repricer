@@ -21,10 +21,18 @@ import {
   UploadOutlined,
   DownloadOutlined,
   FileExcelOutlined,
+  PlusOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
 import apiClient from '@/api/client';
+
+interface ExtraCostItem {
+  name: string;
+  value: number;
+  type: string;
+}
 
 interface Product {
   id: number;
@@ -38,11 +46,15 @@ interface Product {
   current_price: number | null;
   discount_pct: number | null;
   final_price: number | null;
+  spp_pct: number | null;
+  spp_price: number | null;
   commission_pct: number | null;
   logistics_cost: number | null;
   storage_cost: number | null;
   storage_daily: number | null;
   ad_pct: number | null;
+  extra_costs: ExtraCostItem[] | null;
+  extra_costs_total: number | null;
   total_stock: number;
   orders_7d: number;
   margin_pct: number | null;
@@ -69,6 +81,11 @@ export default function ProductsPage() {
   const [sortOrder, setSortOrder] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const pageSize = 20;
+
+  // Extra costs modal state
+  const [extraCostsProduct, setExtraCostsProduct] = useState<Product | null>(null);
+  const [editingExtraCosts, setEditingExtraCosts] = useState<ExtraCostItem[]>([]);
+  const [savingExtraCosts, setSavingExtraCosts] = useState(false);
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
@@ -181,17 +198,47 @@ export default function ProductsPage() {
     }
   };
 
+  const handleSaveExtraCosts = async () => {
+    if (!extraCostsProduct) return;
+    setSavingExtraCosts(true);
+    try {
+      const filtered = editingExtraCosts.filter((item) => item.name.trim() && item.value > 0);
+      const { data } = await apiClient.put(`/products/${extraCostsProduct.id}/cost`, {
+        extra_costs: filtered.map((item) => ({ name: item.name.trim(), value: item.value, type: 'fixed' })),
+      });
+      setProducts((prev) =>
+        prev.map((p) => (p.id === extraCostsProduct.id ? { ...p, ...data } : p))
+      );
+      setExtraCostsProduct(null);
+      message.success('Прочие расходы сохранены');
+    } catch {
+      message.error('Ошибка сохранения');
+    } finally {
+      setSavingExtraCosts(false);
+    }
+  };
+
+  const openExtraCostsModal = (product: Product) => {
+    setExtraCostsProduct(product);
+    setEditingExtraCosts(
+      product.extra_costs && product.extra_costs.length > 0
+        ? product.extra_costs.map((c) => ({ ...c }))
+        : [{ name: '', value: 0, type: 'fixed' }]
+    );
+  };
+
   const formatPrice = (val: number | null) => {
     if (val === null || val === undefined) return '—';
     return `${val.toLocaleString('ru-RU')} ₽`;
   };
 
   const columns: ColumnsType<Product> = [
+    // --- Товар (без группировки) ---
     {
       title: 'Фото',
       dataIndex: 'image_url',
       key: 'image',
-      width: 60,
+      width: 55,
       render: (url: string | null) =>
         url ? (
           <Image src={url} width={40} height={40} style={{ objectFit: 'cover', borderRadius: 4 }} preview={false} />
@@ -203,7 +250,7 @@ export default function ProductsPage() {
       title: 'Артикул WB',
       dataIndex: 'nm_id',
       key: 'nm_id',
-      width: 120,
+      width: 110,
       render: (id: number) => (
         <a href={`https://www.wildberries.ru/catalog/${id}/detail.aspx`} target="_blank" rel="noopener noreferrer">
           {id}
@@ -214,170 +261,235 @@ export default function ProductsPage() {
       title: 'Артикул',
       dataIndex: 'vendor_code',
       key: 'vendor_code',
-      width: 100,
+      width: 90,
     },
     {
       title: 'Бренд',
       dataIndex: 'brand',
       key: 'brand',
-      width: 120,
+      width: 100,
       render: (brand: string | null) =>
         brand ? <Tag color="blue">{brand}</Tag> : '—',
     },
+    // --- Наличие ---
     {
-      title: 'Остаток',
-      dataIndex: 'total_stock',
-      key: 'total_stock',
-      width: 90,
-      align: 'center',
-      render: (val: number) => {
-        if (!val) return <Tag color="red">0</Tag>;
-        const color = val <= 5 ? 'orange' : 'green';
-        return <Tag color={color}>{val}</Tag>;
-      },
-      sorter: true,
+      title: 'Наличие',
+      children: [
+        {
+          title: 'Остаток',
+          dataIndex: 'total_stock',
+          key: 'total_stock',
+          width: 80,
+          align: 'center' as const,
+          render: (val: number) => {
+            if (!val) return <Tag color="red">0</Tag>;
+            const color = val <= 5 ? 'orange' : 'green';
+            return <Tag color={color}>{val}</Tag>;
+          },
+          sorter: true,
+        },
+        {
+          title: 'Заказы 7д',
+          dataIndex: 'orders_7d',
+          key: 'orders_7d',
+          width: 80,
+          align: 'center' as const,
+          render: (val: number) => {
+            if (!val) return <Typography.Text type="secondary">0</Typography.Text>;
+            return <Typography.Text strong>{val}</Typography.Text>;
+          },
+          sorter: true,
+        },
+      ],
     },
+    // --- Цены и скидки ---
     {
-      title: 'Заказы 7д',
-      dataIndex: 'orders_7d',
-      key: 'orders_7d',
-      width: 100,
-      align: 'center',
-      render: (val: number) => {
-        if (!val) return <Typography.Text type="secondary">0</Typography.Text>;
-        return <Typography.Text strong>{val}</Typography.Text>;
-      },
-      sorter: true,
+      title: 'Цены и скидки',
+      children: [
+        {
+          title: 'До скидки',
+          dataIndex: 'current_price',
+          key: 'current_price',
+          width: 110,
+          align: 'right' as const,
+          render: formatPrice,
+          sorter: true,
+        },
+        {
+          title: 'Скидка',
+          dataIndex: 'discount_pct',
+          key: 'discount_pct',
+          width: 75,
+          align: 'center' as const,
+          render: (val: number | null) => {
+            if (val === null || val === undefined) return '—';
+            const color = val >= 50 ? 'red' : val >= 30 ? 'orange' : 'green';
+            return <Tag color={color}>{val}%</Tag>;
+          },
+        },
+        {
+          title: 'Итоговая',
+          dataIndex: 'final_price',
+          key: 'final_price',
+          width: 110,
+          align: 'right' as const,
+          render: (val: number | null) => (
+            <Typography.Text strong>{formatPrice(val)}</Typography.Text>
+          ),
+          sorter: true,
+        },
+        {
+          title: 'СПП %',
+          dataIndex: 'spp_pct',
+          key: 'spp_pct',
+          width: 70,
+          align: 'center' as const,
+          render: (val: number | null) => {
+            if (val === null || val === undefined) return '—';
+            return <Typography.Text type="secondary">{val}%</Typography.Text>;
+          },
+        },
+        {
+          title: 'С СПП',
+          dataIndex: 'spp_price',
+          key: 'spp_price',
+          width: 100,
+          align: 'right' as const,
+          render: (val: number | null) => {
+            if (val === null || val === undefined) return '—';
+            return <Typography.Text>{val.toLocaleString('ru-RU')} ₽</Typography.Text>;
+          },
+        },
+      ],
     },
+    // --- Расходы ---
     {
-      title: 'Цена до скидки',
-      dataIndex: 'current_price',
-      key: 'current_price',
-      width: 130,
-      align: 'right',
-      render: formatPrice,
-      sorter: true,
+      title: 'Расходы',
+      children: [
+        {
+          title: 'Себест.',
+          dataIndex: 'cost_price',
+          key: 'cost_price',
+          width: 90,
+          align: 'right' as const,
+          render: formatPrice,
+        },
+        {
+          title: 'Комис. %',
+          dataIndex: 'commission_pct',
+          key: 'commission_pct',
+          width: 75,
+          align: 'center' as const,
+          render: (val: number | null) => {
+            if (val === null || val === undefined) return '—';
+            return <Typography.Text type="secondary">{val}%</Typography.Text>;
+          },
+        },
+        {
+          title: 'Логист.',
+          dataIndex: 'logistics_cost',
+          key: 'logistics_cost',
+          width: 80,
+          align: 'right' as const,
+          render: (val: number | null) => {
+            if (val === null || val === undefined) return <Typography.Text type="secondary">—</Typography.Text>;
+            return <Typography.Text>{val} ₽</Typography.Text>;
+          },
+        },
+        {
+          title: 'Хранение',
+          key: 'storage',
+          width: 100,
+          align: 'right' as const,
+          render: (_: unknown, record: Product) => {
+            const daily = record.storage_daily;
+            const perSale = record.storage_cost;
+            if (daily === null && perSale === null) return <Typography.Text type="secondary">—</Typography.Text>;
+            return (
+              <div>
+                {daily !== null && (
+                  <div style={{ fontSize: 11, color: '#888' }}>{daily} ₽/сут</div>
+                )}
+                {perSale !== null && (
+                  <div style={{ fontWeight: 500 }}>{perSale} ₽/прод</div>
+                )}
+              </div>
+            );
+          },
+        },
+        {
+          title: 'Рекл. %',
+          dataIndex: 'ad_pct',
+          key: 'ad_pct',
+          width: 80,
+          align: 'center' as const,
+          render: (_: number | null, record: Product) => (
+            <InputNumber
+              size="small"
+              min={0}
+              max={100}
+              step={0.5}
+              placeholder="0"
+              value={record.ad_pct}
+              onBlur={(e) => {
+                const val = e.target.value ? parseFloat(e.target.value) : null;
+                if (val !== record.ad_pct) handleUpdateCost(record.id, 'ad_pct', val);
+              }}
+              onPressEnter={(e) => {
+                const val = (e.target as HTMLInputElement).value ? parseFloat((e.target as HTMLInputElement).value) : null;
+                if (val !== record.ad_pct) handleUpdateCost(record.id, 'ad_pct', val);
+              }}
+              style={{ width: 55 }}
+              suffix="%"
+            />
+          ),
+        },
+        {
+          title: 'Прочие',
+          key: 'extra_costs',
+          width: 75,
+          align: 'center' as const,
+          render: (_: unknown, record: Product) => {
+            const total = record.extra_costs_total;
+            return (
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0 }}
+                onClick={() => openExtraCostsModal(record)}
+              >
+                {total ? `${total} ₽` : '+'}
+              </Button>
+            );
+          },
+        },
+      ],
     },
+    // --- Результат ---
     {
-      title: 'Скидка',
-      dataIndex: 'discount_pct',
-      key: 'discount_pct',
-      width: 90,
-      align: 'center',
-      render: (val: number | null) => {
-        if (val === null || val === undefined) return '—';
-        const color = val >= 50 ? 'red' : val >= 30 ? 'orange' : 'green';
-        return <Tag color={color}>{val}%</Tag>;
-      },
-    },
-    {
-      title: 'Итоговая цена',
-      dataIndex: 'final_price',
-      key: 'final_price',
-      width: 130,
-      align: 'right',
-      render: (val: number | null) => (
-        <Typography.Text strong>{formatPrice(val)}</Typography.Text>
-      ),
-      sorter: true,
-    },
-    {
-      title: 'Себест.',
-      dataIndex: 'cost_price',
-      key: 'cost_price',
-      width: 100,
-      align: 'right',
-      render: formatPrice,
-    },
-    {
-      title: 'Комис. %',
-      dataIndex: 'commission_pct',
-      key: 'commission_pct',
-      width: 85,
-      align: 'center',
-      render: (val: number | null) => {
-        if (val === null || val === undefined) return '—';
-        return <Typography.Text type="secondary">{val}%</Typography.Text>;
-      },
-    },
-    {
-      title: 'Логист.',
-      dataIndex: 'logistics_cost',
-      key: 'logistics_cost',
-      width: 90,
-      align: 'right',
-      render: (val: number | null) => {
-        if (val === null || val === undefined) return <Typography.Text type="secondary">—</Typography.Text>;
-        return <Typography.Text>{val} ₽</Typography.Text>;
-      },
-    },
-    {
-      title: 'Хранение',
-      key: 'storage',
-      width: 110,
-      align: 'right',
-      render: (_: unknown, record: Product) => {
-        const daily = record.storage_daily;
-        const perSale = record.storage_cost;
-        if (daily === null && perSale === null) return <Typography.Text type="secondary">—</Typography.Text>;
-        return (
-          <div>
-            {daily !== null && (
-              <div style={{ fontSize: 11, color: '#888' }}>{daily} ₽/сут</div>
-            )}
-            {perSale !== null && (
-              <div style={{ fontWeight: 500 }}>{perSale} ₽/прод</div>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      title: 'Рекл. %',
-      dataIndex: 'ad_pct',
-      key: 'ad_pct',
-      width: 90,
-      align: 'center',
-      render: (_: number | null, record: Product) => (
-        <InputNumber
-          size="small"
-          min={0}
-          max={100}
-          step={0.5}
-          placeholder="0"
-          value={record.ad_pct}
-          onBlur={(e) => {
-            const val = e.target.value ? parseFloat(e.target.value) : null;
-            if (val !== record.ad_pct) handleUpdateCost(record.id, 'ad_pct', val);
-          }}
-          onPressEnter={(e) => {
-            const val = (e.target as HTMLInputElement).value ? parseFloat((e.target as HTMLInputElement).value) : null;
-            if (val !== record.ad_pct) handleUpdateCost(record.id, 'ad_pct', val);
-          }}
-          style={{ width: 60 }}
-          suffix="%"
-        />
-      ),
-    },
-    {
-      title: 'Маржа',
-      dataIndex: 'margin_pct',
-      key: 'margin_pct',
-      width: 90,
-      align: 'center',
-      render: (val: number | null, record: Product) => {
-        if (val === null || val === undefined) return '—';
-        const color = val < 10 ? 'red' : val < 25 ? 'orange' : 'green';
-        return (
-          <Typography.Text>
-            <Tag color={color}>{val}%</Tag>
-            {record.margin_rub !== null && record.margin_rub !== undefined && (
-              <div style={{ fontSize: 11, color: '#888' }}>{record.margin_rub} ₽</div>
-            )}
-          </Typography.Text>
-        );
-      },
-      sorter: true,
+      title: 'Результат',
+      children: [
+        {
+          title: 'Маржа',
+          dataIndex: 'margin_pct',
+          key: 'margin_pct',
+          width: 90,
+          align: 'center' as const,
+          render: (val: number | null, record: Product) => {
+            if (val === null || val === undefined) return '—';
+            const color = val < 10 ? 'red' : val < 25 ? 'orange' : 'green';
+            return (
+              <Typography.Text>
+                <Tag color={color}>{val}%</Tag>
+                {record.margin_rub !== null && record.margin_rub !== undefined && (
+                  <div style={{ fontSize: 11, color: '#888' }}>{record.margin_rub} ₽</div>
+                )}
+              </Typography.Text>
+            );
+          },
+          sorter: true,
+        },
+      ],
     },
   ];
 
@@ -448,13 +560,12 @@ export default function ProductsPage() {
         rowKey="id"
         loading={loading}
         size="middle"
-        scroll={{ x: 1800 }}
+        bordered
+        scroll={{ x: 1900 }}
         onChange={(pagination, _filters, sorter) => {
-          // Обновляем страницу из пагинации
           if (pagination.current) {
             setPage(pagination.current);
           }
-          // Обновляем сортировку — сброс на стр.1 только при смене сортировки
           if (!Array.isArray(sorter)) {
             const newField = sorter.order ? (sorter.field as string) : null;
             const newOrder = sorter.order || null;
@@ -474,6 +585,7 @@ export default function ProductsPage() {
         }}
       />
 
+      {/* Import result modal */}
       <Modal
         title="Результат импорта"
         open={importResult !== null}
@@ -497,6 +609,73 @@ export default function ProductsPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Extra costs modal */}
+      <Modal
+        title={
+          extraCostsProduct
+            ? `Прочие расходы — ${extraCostsProduct.vendor_code || extraCostsProduct.nm_id}`
+            : 'Прочие расходы'
+        }
+        open={extraCostsProduct !== null}
+        onOk={handleSaveExtraCosts}
+        onCancel={() => setExtraCostsProduct(null)}
+        okText="Сохранить"
+        cancelText="Отмена"
+        confirmLoading={savingExtraCosts}
+        width={480}
+      >
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text type="secondary">
+            Фиксированные расходы в рублях на единицу товара
+          </Typography.Text>
+        </div>
+        {editingExtraCosts.map((item, index) => (
+          <div key={index} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+            <Input
+              placeholder="Название (упаковка, доставка до WB...)"
+              value={item.name}
+              onChange={(e) => {
+                const updated = [...editingExtraCosts];
+                updated[index] = { ...updated[index], name: e.target.value };
+                setEditingExtraCosts(updated);
+              }}
+              style={{ flex: 1 }}
+            />
+            <InputNumber
+              placeholder="0"
+              min={0}
+              step={1}
+              value={item.value || undefined}
+              onChange={(val) => {
+                const updated = [...editingExtraCosts];
+                updated[index] = { ...updated[index], value: val || 0 };
+                setEditingExtraCosts(updated);
+              }}
+              style={{ width: 100 }}
+              suffix="₽"
+            />
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => {
+                setEditingExtraCosts(editingExtraCosts.filter((_, i) => i !== index));
+              }}
+            />
+          </div>
+        ))}
+        <Button
+          type="dashed"
+          block
+          icon={<PlusOutlined />}
+          onClick={() => {
+            setEditingExtraCosts([...editingExtraCosts, { name: '', value: 0, type: 'fixed' }]);
+          }}
+        >
+          Добавить расход
+        </Button>
       </Modal>
     </div>
   );

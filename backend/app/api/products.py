@@ -15,7 +15,9 @@ from app.models.price import PriceSnapshot
 from app.models.product import Product, WBAccount
 from app.models.sales import SalesDaily
 from app.models.user import User
-from app.schemas.product import ProductCostUpdate, ProductList, ProductResponse
+import json as json_module
+
+from app.schemas.product import ExtraCostItem, ProductCostUpdate, ProductList, ProductResponse
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -85,16 +87,34 @@ async def _enrich_with_prices(
         storage_cost = float(p.storage_cost) if p.storage_cost is not None else None
         storage_daily = float(p.storage_daily) if p.storage_daily is not None else None
         ad_pct = float(p.ad_pct) if p.ad_pct is not None else None
+        spp_pct = float(p.spp_pct) if p.spp_pct is not None else None
+
+        # Parse extra costs
+        extra_costs: list[ExtraCostItem] | None = None
+        extra_costs_total: float | None = None
+        if p.extra_costs_json:
+            try:
+                raw = json_module.loads(p.extra_costs_json)
+                extra_costs = [ExtraCostItem(**item) for item in raw]
+                extra_costs_total = sum(
+                    item.value for item in extra_costs if item.type == "fixed"
+                )
+            except (json_module.JSONDecodeError, TypeError):
+                pass
+
+        # SPP price (informational — SPP is paid by WB, not seller)
+        spp_price = round(final_price * (1 - spp_pct / 100), 2) if spp_pct and final_price else None
 
         # Get account-level settings
         acc_tax, acc_tariff = account_settings.get(p.account_id, (0.0, 0.0))
 
         # Calculate margin with all costs:
-        # margin = final_price - cost_price - tax - commission - tariff - logistics - storage - ad(%)
+        # Tax is calculated from spp_price (buyer's actual price), not final_price
         margin_pct = None
         margin_rub = None
         if final_price and cost_price and final_price > 0:
-            tax_amount = final_price * acc_tax / 100 if acc_tax else 0
+            tax_base = spp_price if spp_price else final_price
+            tax_amount = tax_base * acc_tax / 100 if acc_tax else 0
             commission_amount = final_price * commission_pct / 100 if commission_pct else 0
             tariff_amount = final_price * acc_tariff / 100 if acc_tariff else 0
             ad_amount = final_price * ad_pct / 100 if ad_pct else 0
@@ -106,6 +126,7 @@ async def _enrich_with_prices(
                 + (logistics_cost or 0)
                 + (storage_cost or 0)
                 + ad_amount
+                + (extra_costs_total or 0)
             )
             margin_rub = round(final_price - total_costs, 2)
             margin_pct = round(margin_rub / final_price * 100, 1)
@@ -127,11 +148,15 @@ async def _enrich_with_prices(
                 current_price=float(snap.wb_price) if snap else None,
                 discount_pct=float(snap.wb_discount) if snap else None,
                 final_price=final_price,
+                spp_pct=spp_pct,
+                spp_price=spp_price,
                 commission_pct=commission_pct,
                 logistics_cost=logistics_cost,
                 storage_cost=storage_cost,
                 storage_daily=storage_daily,
                 ad_pct=ad_pct,
+                extra_costs=extra_costs,
+                extra_costs_total=extra_costs_total,
                 orders_7d=orders_map.get(p.id, 0),
                 margin_pct=margin_pct,
                 margin_rub=margin_rub,
@@ -295,7 +320,7 @@ async def export_costs(
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    writer.writerow(["Артикул WB", "Артикул", "Бренд", "Название", "Себестоимость", "Комиссия %", "Логистика ₽", "Хранение ₽/прод", "Хранение ₽/сут", "Реклама %", "Остаток"])
+    writer.writerow(["Артикул WB", "Артикул", "Бренд", "Название", "Себестоимость", "Комиссия %", "Логистика ₽", "Хранение ₽/прод", "Хранение ₽/сут", "СПП %", "Реклама %", "Остаток"])
     for p in products:
         writer.writerow([
             p.nm_id,
@@ -307,6 +332,7 @@ async def export_costs(
             float(p.logistics_cost) if p.logistics_cost else "",
             float(p.storage_cost) if p.storage_cost else "",
             float(p.storage_daily) if p.storage_daily else "",
+            float(p.spp_pct) if p.spp_pct else "",
             float(p.ad_pct) if p.ad_pct else "",
             p.total_stock,
         ])
@@ -401,6 +427,10 @@ async def update_product_cost(
         product.cost_price = data.cost_price
     if data.ad_pct is not None:
         product.ad_pct = data.ad_pct
+    if data.extra_costs is not None:
+        product.extra_costs_json = json_module.dumps(
+            [item.model_dump() for item in data.extra_costs]
+        )
 
     enriched = await _enrich_with_prices(db, [product])
     return enriched[0]

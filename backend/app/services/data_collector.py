@@ -328,9 +328,10 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
     """Sync per-unit logistics and storage costs from WB financial report.
 
     Fetches reportDetailByPeriod for last 4 weeks and calculates:
-    - logistics_cost: average delivery cost per unit (delivery_rub / delivery_amount)
+    - logistics_cost: total logistics (forward + return) / sales count — effective per-sale cost
     - storage_cost: storage cost per sale (total_storage_fee / sales_count)
     - storage_daily: total daily storage cost (total_storage_fee / days_in_period)
+    - spp_pct: average SPP % from sales
     Returns number of products updated.
     """
     MSK = timezone(timedelta(hours=3))
@@ -350,10 +351,10 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
 
     # Aggregate by nm_id
     seen_in_report: set[int] = set()                          # nm_ids with any report data
-    logistics_total: dict[int, float] = defaultdict(float)   # SUM(delivery_rub)
-    delivery_count: dict[int, int] = defaultdict(int)         # SUM(delivery_amount)
+    logistics_total: dict[int, float] = defaultdict(float)   # SUM(delivery_rub) — all logistics including returns
     storage_total: dict[int, float] = defaultdict(float)      # SUM(storage_fee)
-    sales_count: dict[int, int] = defaultdict(int)            # count of sales
+    sales_count: dict[int, int] = defaultdict(int)            # count of sales (denominator for logistics)
+    spp_values: dict[int, list[float]] = defaultdict(list)    # ppvz_spp_prc per sale
 
     for row in rows:
         nm_id = row.get("nm_id")
@@ -363,19 +364,19 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
         seen_in_report.add(nm_id)
 
         delivery_rub = row.get("delivery_rub", 0) or 0
-        delivery_amt = row.get("delivery_amount", 0) or 0
         storage_fee = row.get("storage_fee", 0) or 0
         oper_name = row.get("supplier_oper_name", "")
         quantity = row.get("quantity", 0) or 0
+        spp_prc = row.get("ppvz_spp_prc")
 
-        if delivery_rub > 0:
-            logistics_total[nm_id] += delivery_rub
-        if delivery_amt > 0:
-            delivery_count[nm_id] += delivery_amt
+        # Sum ALL delivery costs (forward + return logistics + corrections)
+        logistics_total[nm_id] += delivery_rub
         # Always accumulate storage (even 0) — free storage should show 0, not NULL
         storage_total[nm_id] += storage_fee
         if oper_name == "Продажа" and quantity > 0:
             sales_count[nm_id] += quantity
+            if spp_prc is not None:
+                spp_values[nm_id].append(float(spp_prc))
 
     days_in_period = 28
 
@@ -392,9 +393,9 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
             continue
         changed = False
 
-        # Logistics per delivery
-        if nm_id in logistics_total and delivery_count.get(nm_id, 0) > 0:
-            new_logistics = round(logistics_total[nm_id] / delivery_count[nm_id], 2)
+        # Logistics per sale (total logistics including return overhead / sales count)
+        if sales_count.get(nm_id, 0) > 0:
+            new_logistics = round(logistics_total.get(nm_id, 0) / sales_count[nm_id], 2)
             if product.logistics_cost != new_logistics:
                 product.logistics_cost = new_logistics
                 changed = True
@@ -412,6 +413,13 @@ async def sync_financial_costs(db: AsyncSession, client: WBApiClient, account_id
         if product.storage_daily != new_storage_daily:
             product.storage_daily = new_storage_daily
             changed = True
+
+        # Average SPP % from sales
+        if nm_id in spp_values and spp_values[nm_id]:
+            avg_spp = round(sum(spp_values[nm_id]) / len(spp_values[nm_id]), 1)
+            if product.spp_pct != avg_spp:
+                product.spp_pct = avg_spp
+                changed = True
 
         if changed:
             updated += 1

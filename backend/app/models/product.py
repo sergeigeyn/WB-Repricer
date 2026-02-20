@@ -42,7 +42,8 @@ class Product(Base):
     storage_cost: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Storage ₽ per sale (auto from WB)
     storage_daily: Mapped[float | None] = mapped_column(Numeric(12, 2))  # Storage ₽ total per day (auto from WB)
     ad_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))  # Advertising % of revenue
-    extra_costs_json: Mapped[str | None] = mapped_column(Text)  # JSON
+    spp_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))  # Average SPP % (auto from WB)
+    extra_costs_json: Mapped[str | None] = mapped_column(Text)  # JSON list of {name, value, type}
     total_stock: Mapped[int] = mapped_column(default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
     is_locomotive: Mapped[bool] = mapped_column(default=False)
