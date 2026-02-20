@@ -8,10 +8,20 @@ import {
   Space,
   Button,
   Switch,
+  Upload,
+  Modal,
+  Dropdown,
   message,
 } from 'antd';
-import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import {
+  ReloadOutlined,
+  SearchOutlined,
+  UploadOutlined,
+  DownloadOutlined,
+  FileExcelOutlined,
+} from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import type { UploadProps } from 'antd';
 import apiClient from '@/api/client';
 
 interface Product {
@@ -27,7 +37,15 @@ interface Product {
   discount_pct: number | null;
   final_price: number | null;
   total_stock: number;
+  orders_7d: number;
+  margin_pct: number | null;
   is_active: boolean;
+}
+
+interface ImportResult {
+  updated: number;
+  skipped: number;
+  errors: string[];
 }
 
 export default function ProductsPage() {
@@ -38,6 +56,7 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('');
   const [inStock, setInStock] = useState(false);
   const [page, setPage] = useState(1);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const pageSize = 20;
 
   const fetchProducts = useCallback(async () => {
@@ -68,7 +87,7 @@ export default function ProductsPage() {
     try {
       const { data } = await apiClient.post('/data/collect');
       message.success(
-        `Собрано: ${data.products_synced} товаров, ${data.price_snapshots} цен`
+        `Собрано: ${data.products_synced} товаров, ${data.price_snapshots} цен, ${data.orders_synced} заказов`
       );
       fetchProducts();
     } catch {
@@ -76,6 +95,66 @@ export default function ProductsPage() {
     } finally {
       setCollecting(false);
     }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await apiClient.get('/products/cost-template', {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'cost_template.csv');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      message.error('Ошибка скачивания шаблона');
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const response = await apiClient.get('/products/export-costs', {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'products_costs.csv');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      message.error('Ошибка экспорта');
+    }
+  };
+
+  const uploadProps: UploadProps = {
+    name: 'file',
+    accept: '.csv,.xlsx,.xls',
+    showUploadList: false,
+    customRequest: async ({ file, onSuccess, onError }) => {
+      const formData = new FormData();
+      formData.append('file', file as File);
+      try {
+        const { data } = await apiClient.post('/products/import-costs', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        setImportResult(data);
+        if (data.updated > 0) {
+          message.success(`Обновлено ${data.updated} товаров`);
+          fetchProducts();
+        }
+        onSuccess?.(data);
+      } catch {
+        message.error('Ошибка импорта файла');
+        onError?.(new Error('Upload failed'));
+      }
+    },
   };
 
   const formatPrice = (val: number | null) => {
@@ -128,13 +207,6 @@ export default function ProductsPage() {
         brand ? <Tag color="blue">{brand}</Tag> : '—',
     },
     {
-      title: 'Категория',
-      dataIndex: 'category',
-      key: 'category',
-      width: 180,
-      ellipsis: true,
-    },
-    {
       title: 'Остаток',
       dataIndex: 'total_stock',
       key: 'total_stock',
@@ -146,6 +218,18 @@ export default function ProductsPage() {
         return <Tag color={color}>{val}</Tag>;
       },
       sorter: (a, b) => a.total_stock - b.total_stock,
+    },
+    {
+      title: 'Заказы 7д',
+      dataIndex: 'orders_7d',
+      key: 'orders_7d',
+      width: 100,
+      align: 'center',
+      render: (val: number) => {
+        if (!val) return <Typography.Text type="secondary">0</Typography.Text>;
+        return <Typography.Text strong>{val}</Typography.Text>;
+      },
+      sorter: (a, b) => a.orders_7d - b.orders_7d,
     },
     {
       title: 'Цена до скидки',
@@ -179,6 +263,27 @@ export default function ProductsPage() {
       ),
       sorter: (a, b) => (a.final_price || 0) - (b.final_price || 0),
     },
+    {
+      title: 'Себест.',
+      dataIndex: 'cost_price',
+      key: 'cost_price',
+      width: 110,
+      align: 'right',
+      render: formatPrice,
+    },
+    {
+      title: 'Маржа',
+      dataIndex: 'margin_pct',
+      key: 'margin_pct',
+      width: 90,
+      align: 'center',
+      render: (val: number | null) => {
+        if (val === null || val === undefined) return '—';
+        const color = val < 10 ? 'red' : val < 25 ? 'orange' : 'green';
+        return <Tag color={color}>{val}%</Tag>;
+      },
+      sorter: (a, b) => (a.margin_pct || 0) - (b.margin_pct || 0),
+    },
   ];
 
   return (
@@ -208,6 +313,29 @@ export default function ProductsPage() {
             checkedChildren="В наличии"
             unCheckedChildren="Все"
           />
+          <Dropdown
+            menu={{
+              items: [
+                {
+                  key: 'template',
+                  icon: <DownloadOutlined />,
+                  label: 'Скачать шаблон CSV',
+                  onClick: handleDownloadTemplate,
+                },
+                {
+                  key: 'export',
+                  icon: <DownloadOutlined />,
+                  label: 'Экспорт товаров CSV',
+                  onClick: handleExport,
+                },
+              ],
+            }}
+          >
+            <Button icon={<FileExcelOutlined />}>Себестоимость</Button>
+          </Dropdown>
+          <Upload {...uploadProps}>
+            <Button icon={<UploadOutlined />}>Импорт CSV/Excel</Button>
+          </Upload>
           <Button
             icon={<ReloadOutlined />}
             loading={collecting}
@@ -224,6 +352,7 @@ export default function ProductsPage() {
         rowKey="id"
         loading={loading}
         size="middle"
+        scroll={{ x: 1600 }}
         pagination={{
           current: page,
           pageSize,
@@ -233,6 +362,31 @@ export default function ProductsPage() {
           showSizeChanger: false,
         }}
       />
+
+      <Modal
+        title="Результат импорта"
+        open={importResult !== null}
+        onOk={() => setImportResult(null)}
+        onCancel={() => setImportResult(null)}
+        cancelButtonProps={{ style: { display: 'none' } }}
+      >
+        {importResult && (
+          <div>
+            <p><strong>Обновлено:</strong> {importResult.updated} товаров</p>
+            <p><strong>Пропущено:</strong> {importResult.skipped}</p>
+            {importResult.errors.length > 0 && (
+              <>
+                <p><strong>Ошибки:</strong></p>
+                <ul style={{ maxHeight: 200, overflow: 'auto' }}>
+                  {importResult.errors.map((err, i) => (
+                    <li key={i} style={{ color: 'red' }}>{err}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -23,6 +23,9 @@ class ProductResponse(BaseModel):
     current_price: float | None = None
     discount_pct: float | None = None
     final_price: float | None = None
+    # Calculated metrics
+    orders_7d: int = 0
+    margin_pct: float | None = None
 
     model_config = {"from_attributes": True}
 

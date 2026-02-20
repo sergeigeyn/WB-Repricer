@@ -1,7 +1,8 @@
 """Data Collector: sync products and prices from WB API into the database."""
 
 import logging
-from datetime import UTC, datetime
+from collections import defaultdict
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,7 @@ from app.core.database import async_session
 from app.core.security import decrypt_api_key
 from app.models.price import PriceSnapshot
 from app.models.product import Product, WBAccount
+from app.models.sales import SalesDaily
 from app.services.wb_api.client import WBApiClient
 
 logger = logging.getLogger(__name__)
@@ -182,6 +184,72 @@ async def sync_stocks(db: AsyncSession, client: WBApiClient, account_id: int) ->
     return updated
 
 
+async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
+    """Sync orders from WB Statistics API into SalesDaily.
+
+    Fetches last 7 days of orders, aggregates by (nm_id, date), upserts into sales_daily.
+    Returns number of daily records upserted.
+    """
+    date_from = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00")
+
+    try:
+        orders = await client.get_orders(date_from)
+    except Exception as e:
+        logger.warning("Failed to fetch orders: %s", e)
+        return 0
+
+    if not orders:
+        logger.info("No orders from WB for account %d", account_id)
+        return 0
+
+    # Build nm_id → product_id map
+    result = await db.execute(
+        select(Product.nm_id, Product.id).where(Product.account_id == account_id)
+    )
+    product_map = {row.nm_id: row.id for row in result.all()}
+
+    # Aggregate orders by (nm_id, date)
+    daily_counts: dict[tuple[int, date], int] = defaultdict(int)
+    for order in orders:
+        nm_id = order.get("nmId")
+        if not nm_id or nm_id not in product_map:
+            continue
+        # Parse date from order (format: "2026-02-15T10:30:00")
+        order_date_str = order.get("date", "")
+        if not order_date_str:
+            continue
+        try:
+            order_date = datetime.fromisoformat(order_date_str.replace("Z", "+00:00")).date()
+        except (ValueError, AttributeError):
+            continue
+        daily_counts[(nm_id, order_date)] += 1
+
+    # Upsert into sales_daily
+    upserted = 0
+    for (nm_id, order_date), count in daily_counts.items():
+        product_id = product_map[nm_id]
+        result = await db.execute(
+            select(SalesDaily).where(
+                SalesDaily.product_id == product_id,
+                SalesDaily.date == order_date,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.orders_count = count
+        else:
+            db.add(SalesDaily(
+                product_id=product_id,
+                date=order_date,
+                orders_count=count,
+            ))
+        upserted += 1
+
+    await db.flush()
+    logger.info("Upserted %d daily order records for account %d", upserted, account_id)
+    return upserted
+
+
 async def collect_all() -> dict:
     """Main entry point: collect products, prices and stocks for all active WB accounts.
 
@@ -192,6 +260,7 @@ async def collect_all() -> dict:
         "products_synced": 0,
         "price_snapshots": 0,
         "stocks_updated": 0,
+        "orders_synced": 0,
         "errors": [],
     }
 
@@ -217,6 +286,9 @@ async def collect_all() -> dict:
                 stocks_count = await sync_stocks(db, client, account.id)
                 results["stocks_updated"] += stocks_count
 
+                orders_count = await sync_orders(db, client, account.id)
+                results["orders_synced"] += orders_count
+
             except Exception as e:
                 error_msg = f"Account {account.id} ({account.name}): {e}"
                 logger.error("Data collection failed: %s", error_msg)
@@ -225,10 +297,11 @@ async def collect_all() -> dict:
         await db.commit()
 
     logger.info(
-        "Data collection complete: %d accounts, %d products, %d prices, %d stocks",
+        "Data collection complete: %d accounts, %d products, %d prices, %d stocks, %d orders",
         results["accounts"],
         results["products_synced"],
         results["price_snapshots"],
         results["stocks_updated"],
+        results["orders_synced"],
     )
     return results
