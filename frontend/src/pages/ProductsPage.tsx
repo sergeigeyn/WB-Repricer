@@ -56,6 +56,8 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('');
   const [inStock, setInStock] = useState(false);
   const [page, setPage] = useState(1);
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const pageSize = 20;
 
@@ -68,6 +70,8 @@ export default function ProductsPage() {
       };
       if (search) params.search = search;
       if (inStock) params.in_stock = true;
+      if (sortField) params.sort_by = sortField;
+      if (sortOrder) params.sort_order = sortOrder;
       const { data } = await apiClient.get('/products', { params });
       setProducts(data.items);
       setTotal(data.total);
@@ -76,7 +80,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, inStock]);
+  }, [page, search, inStock, sortField, sortOrder]);
 
   useEffect(() => {
     fetchProducts();
@@ -217,7 +221,7 @@ export default function ProductsPage() {
         const color = val <= 5 ? 'orange' : 'green';
         return <Tag color={color}>{val}</Tag>;
       },
-      sorter: (a, b) => a.total_stock - b.total_stock,
+      sorter: true,
     },
     {
       title: 'Заказы 7д',
@@ -229,7 +233,7 @@ export default function ProductsPage() {
         if (!val) return <Typography.Text type="secondary">0</Typography.Text>;
         return <Typography.Text strong>{val}</Typography.Text>;
       },
-      sorter: (a, b) => a.orders_7d - b.orders_7d,
+      sorter: true,
     },
     {
       title: 'Цена до скидки',
@@ -238,7 +242,7 @@ export default function ProductsPage() {
       width: 130,
       align: 'right',
       render: formatPrice,
-      sorter: (a, b) => (a.current_price || 0) - (b.current_price || 0),
+      sorter: true,
     },
     {
       title: 'Скидка',
@@ -261,7 +265,7 @@ export default function ProductsPage() {
       render: (val: number | null) => (
         <Typography.Text strong>{formatPrice(val)}</Typography.Text>
       ),
-      sorter: (a, b) => (a.final_price || 0) - (b.final_price || 0),
+      sorter: true,
     },
     {
       title: 'Себест.',
@@ -282,7 +286,7 @@ export default function ProductsPage() {
         const color = val < 10 ? 'red' : val < 25 ? 'orange' : 'green';
         return <Tag color={color}>{val}%</Tag>;
       },
-      sorter: (a, b) => (a.margin_pct || 0) - (b.margin_pct || 0),
+      sorter: true,
     },
   ];
 
@@ -353,6 +357,13 @@ export default function ProductsPage() {
         loading={loading}
         size="middle"
         scroll={{ x: 1600 }}
+        onChange={(_pagination, _filters, sorter) => {
+          if (!Array.isArray(sorter)) {
+            setSortField(sorter.order ? (sorter.field as string) : null);
+            setSortOrder(sorter.order || null);
+            setPage(1);
+          }
+        }}
         pagination={{
           current: page,
           pageSize,

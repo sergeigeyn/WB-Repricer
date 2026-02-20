@@ -255,6 +255,8 @@ async def list_products(
     category: str | None = None,
     is_active: bool | None = None,
     in_stock: bool | None = None,
+    sort_by: str | None = None,
+    sort_order: str = "ascend",
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
@@ -278,14 +280,20 @@ async def list_products(
     if in_stock:
         query = query.where(Product.total_stock >= 1)
 
-    count_result = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = count_result.scalar() or 0
+    # Load all matching products, enrich, sort, then paginate
+    result = await db.execute(query.order_by(Product.nm_id))
+    all_products = list(result.scalars().all())
 
-    result = await db.execute(query.offset(skip).limit(limit).order_by(Product.nm_id))
-    products = list(result.scalars().all())
+    items = await _enrich_with_prices(db, all_products)
 
-    items = await _enrich_with_prices(db, products)
-    return ProductList(items=items, total=total)
+    # Server-side sorting on enriched data
+    if sort_by:
+        reverse = sort_order == "descend"
+        items.sort(key=lambda x: getattr(x, sort_by, 0) or 0, reverse=reverse)
+
+    total = len(items)
+    page_items = items[skip : skip + limit]
+    return ProductList(items=page_items, total=total)
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
