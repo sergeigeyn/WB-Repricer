@@ -4,6 +4,7 @@ import { Layout, Menu, Button, Typography, Space } from 'antd';
 import {
   DashboardOutlined,
   ShoppingOutlined,
+  GiftOutlined,
   LineChartOutlined,
   ThunderboltOutlined,
   SettingOutlined,
@@ -19,6 +20,7 @@ const { Header, Sider, Content } = Layout;
 const menuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: 'Дашборд' },
   { key: '/products', icon: <ShoppingOutlined />, label: 'Товары' },
+  { key: '/promotions', icon: <GiftOutlined />, label: 'Акции' },
   { key: '/strategies', icon: <ThunderboltOutlined />, label: 'Стратегии' },
   { key: '/analytics', icon: <LineChartOutlined />, label: 'Аналитика' },
   { key: '/settings', icon: <SettingOutlined />, label: 'Настройки' },

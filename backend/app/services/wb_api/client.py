@@ -6,6 +6,7 @@ WB uses different domains per API section:
 - statistics-api.wildberries.ru — orders & sales history
 - marketplace-api.wildberries.ru — FBO/FBS orders, stocks, warehouses
 - advert-api.wildberries.ru — advertising campaigns
+- dp-calendar-api.wildberries.ru — promotions calendar
 """
 
 import asyncio
@@ -25,6 +26,7 @@ WB_MARKETPLACE = "https://marketplace-api.wildberries.ru"
 WB_ADVERT = "https://advert-api.wildberries.ru"
 WB_COMMON = "https://common-api.wildberries.ru"
 WB_ANALYTICS = "https://seller-analytics-api.wildberries.ru"
+WB_CALENDAR = "https://dp-calendar-api.wildberries.ru"
 
 
 class BaseWBClient(ABC):
@@ -307,3 +309,82 @@ class WBApiClient(BaseWBClient):
         tariffs = data.get("response", {}).get("data", {}).get("warehouseList", [])
         logger.info("Fetched box tariffs for %d warehouses", len(tariffs))
         return data
+
+    # --- Calendar API (Promotions) ---
+
+    async def get_promotions(self) -> list[dict[str, Any]]:
+        """Fetch list of available promotions from WB Calendar API.
+
+        Returns list of promotions with id, name, dates, type, counts.
+        """
+        data = await self._request(
+            "GET", f"{WB_CALENDAR}/api/v1/calendar/promotions",
+        )
+        promotions = data.get("data", {}).get("promotions", []) if isinstance(data, dict) else []
+        logger.info("Fetched %d promotions from WB Calendar API", len(promotions))
+        return promotions
+
+    async def get_promotion_details(self, promo_id: int) -> dict[str, Any]:
+        """Fetch promotion details (description, conditions).
+
+        Args:
+            promo_id: WB promotion ID
+
+        Returns: promotion detail dict.
+        """
+        data = await self._request(
+            "GET",
+            f"{WB_CALENDAR}/api/v1/calendar/promotions/details",
+            params={"promotionID": promo_id},
+        )
+        return data.get("data", {}).get("promotion", {}) if isinstance(data, dict) else {}
+
+    async def get_promotion_nomenclatures(self, promo_id: int) -> list[dict[str, Any]]:
+        """Fetch nomenclatures (products) eligible for a promotion.
+
+        Returns list of dicts with nmID, planPrice, planDiscount, inAction, currentPrice.
+        Uses limit/offset pagination (default 1000 per page).
+        """
+        all_items: list[dict[str, Any]] = []
+        offset = 0
+        limit = 1000
+
+        while True:
+            data = await self._request(
+                "GET",
+                f"{WB_CALENDAR}/api/v1/calendar/promotions/nomenclatures",
+                params={"promotionID": promo_id, "limit": limit, "offset": offset},
+            )
+            items = data.get("data", {}).get("nomenclatures", []) if isinstance(data, dict) else []
+            all_items.extend(items)
+
+            if len(items) < limit:
+                break
+            offset += limit
+
+        logger.info("Fetched %d nomenclatures for promotion %d", len(all_items), promo_id)
+        return all_items
+
+    async def upload_promotion_nomenclatures(
+        self, promo_id: int, nomenclatures: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Enter products into a promotion via WB Calendar API.
+
+        Args:
+            promo_id: WB promotion ID
+            nomenclatures: list of {"nm": nmID, "newPrice": price}
+
+        Returns: API response dict.
+        """
+        data = await self._request(
+            "POST",
+            f"{WB_CALENDAR}/api/v1/calendar/promotions/nomenclatures",
+            json={
+                "data": {
+                    "promotionID": promo_id,
+                    "nomenclatures": nomenclatures,
+                }
+            },
+        )
+        logger.info("Uploaded %d nomenclatures to promotion %d", len(nomenclatures), promo_id)
+        return data if isinstance(data, dict) else {}

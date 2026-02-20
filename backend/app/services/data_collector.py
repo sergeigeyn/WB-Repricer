@@ -11,7 +11,9 @@ from app.core.database import async_session
 from app.core.security import decrypt_api_key
 from app.models.price import PriceSnapshot
 from app.models.product import Product, WBAccount
+from app.models.promotion import Promotion
 from app.models.sales import SalesDaily
+from app.services.promotion_collector import sync_promotion_products, sync_promotions
 from app.services.wb_api.client import WBApiClient
 
 logger = logging.getLogger(__name__)
@@ -514,6 +516,7 @@ async def collect_all() -> dict:
         "commissions_updated": 0,
         "financial_costs_updated": 0,
         "storage_updated": 0,
+        "promotions_synced": 0,
         "errors": [],
     }
 
@@ -550,6 +553,23 @@ async def collect_all() -> dict:
 
                 storage_count = await sync_paid_storage(db, client, account.id)
                 results["storage_updated"] += storage_count
+
+                # Sync promotions from Calendar API
+                promos_count = await sync_promotions(db, client, account.id)
+                results["promotions_synced"] += promos_count
+
+                # Sync products for active/upcoming promotions
+                promo_result = await db.execute(
+                    select(Promotion).where(
+                        Promotion.account_id == account.id,
+                        Promotion.status.in_(["active", "upcoming"]),
+                    )
+                )
+                for promo in promo_result.scalars().all():
+                    if promo.wb_promo_id:
+                        await sync_promotion_products(
+                            db, client, account.id, promo.id, promo.wb_promo_id
+                        )
 
             except Exception as e:
                 error_msg = f"Account {account.id} ({account.name}): {e}"
