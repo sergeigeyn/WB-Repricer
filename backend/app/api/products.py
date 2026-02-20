@@ -111,10 +111,11 @@ async def download_cost_template(
             float(p.tax_rate) if p.tax_rate else "",
         ])
 
-    output.seek(0)
+    # Encode with UTF-8 BOM for correct display in Excel on Windows
+    csv_bytes = ("\ufeff" + output.getvalue()).encode("utf-8")
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8-sig",
         headers={"Content-Disposition": "attachment; filename=cost_template.csv"},
     )
 
@@ -238,10 +239,11 @@ async def export_costs(
             p.total_stock,
         ])
 
-    output.seek(0)
+    # Encode with UTF-8 BOM for correct display in Excel on Windows
+    csv_bytes = ("\ufeff" + output.getvalue()).encode("utf-8")
     return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8-sig",
         headers={"Content-Disposition": "attachment; filename=products_costs.csv"},
     )
 

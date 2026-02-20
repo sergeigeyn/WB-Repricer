@@ -141,41 +141,38 @@ async def sync_prices(db: AsyncSession, client: WBApiClient, account_id: int) ->
 
 
 async def sync_stocks(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
-    """Sync stock quantities from WB Marketplace API into Product.total_stock.
+    """Sync stock quantities from WB Statistics API into Product.total_stock.
 
+    Uses Statistics API /supplier/stocks which covers both FBO and FBS warehouses.
     Returns number of products with updated stock.
     """
-    # Get products with barcodes for this account
+    # Get products for this account
     result = await db.execute(
-        select(Product).where(
-            Product.account_id == account_id,
-            Product.barcode.is_not(None),
-        )
+        select(Product).where(Product.account_id == account_id)
     )
     products = list(result.scalars().all())
     if not products:
-        logger.info("No products with barcodes for account %d", account_id)
+        logger.info("No products for account %d", account_id)
         return 0
 
-    barcode_to_product = {p.barcode: p for p in products}
-    barcodes = list(barcode_to_product.keys())
+    nm_to_product = {p.nm_id: p for p in products}
 
     try:
-        stock_map = await client.get_stocks(barcodes)
+        stock_map = await client.get_supplier_stocks()
     except Exception as e:
         logger.warning("Failed to fetch stocks: %s", e)
         return 0
 
     updated = 0
-    for barcode, qty in stock_map.items():
-        product = barcode_to_product.get(barcode)
+    for nm_id, qty in stock_map.items():
+        product = nm_to_product.get(nm_id)
         if product and product.total_stock != qty:
             product.total_stock = qty
             updated += 1
 
     # Set stock to 0 for products not in stock_map
-    for barcode, product in barcode_to_product.items():
-        if barcode not in stock_map and product.total_stock != 0:
+    for nm_id, product in nm_to_product.items():
+        if nm_id not in stock_map and product.total_stock != 0:
             product.total_stock = 0
             updated += 1
 
@@ -208,9 +205,15 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
     )
     product_map = {row.nm_id: row.id for row in result.all()}
 
-    # Aggregate orders by (nm_id, date)
+    # Aggregate orders by (nm_id, date), excluding cancelled orders
     daily_counts: dict[tuple[int, date], int] = defaultdict(int)
+    skipped_cancelled = 0
     for order in orders:
+        # Skip cancelled orders
+        if order.get("isCancel"):
+            skipped_cancelled += 1
+            continue
+
         nm_id = order.get("nmId")
         if not nm_id or nm_id not in product_map:
             continue
@@ -223,6 +226,9 @@ async def sync_orders(db: AsyncSession, client: WBApiClient, account_id: int) ->
         except (ValueError, AttributeError):
             continue
         daily_counts[(nm_id, order_date)] += 1
+
+    if skipped_cancelled:
+        logger.info("Skipped %d cancelled orders for account %d", skipped_cancelled, account_id)
 
     # Upsert into sales_daily
     upserted = 0

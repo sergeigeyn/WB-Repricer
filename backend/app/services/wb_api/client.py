@@ -121,40 +121,30 @@ class WBApiClient(BaseWBClient):
         )
         return data if isinstance(data, list) else []
 
-    async def get_stocks(self, barcodes: list[str]) -> dict[str, int]:
-        """Fetch stock quantities across all seller warehouses.
+    async def get_supplier_stocks(self) -> dict[int, int]:
+        """Fetch stock quantities from Statistics API (covers FBO + FBS warehouses).
 
-        Args:
-            barcodes: List of product barcodes (SKUs) to query.
-
-        Returns: {barcode: total_quantity}
+        Returns: {nm_id: total_quantity} aggregated across all warehouses.
         """
-        warehouses = await self.get_warehouses()
-        stock_map: dict[str, int] = {}
+        # Statistics API requires dateFrom, use 1 day ago
+        from datetime import datetime, timedelta, UTC
+        date_from = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00")
 
-        # Split barcodes into chunks of 1000 (API limit)
-        chunks = [barcodes[i:i + 1000] for i in range(0, len(barcodes), 1000)]
+        data = await self._request(
+            "GET",
+            f"{WB_STATISTICS}/api/v1/supplier/stocks?dateFrom={date_from}",
+        )
+        items = data if isinstance(data, list) else []
 
-        for wh in warehouses:
-            wh_id = wh.get("id")
-            if not wh_id:
-                continue
-            for chunk in chunks:
-                try:
-                    data = await self._request(
-                        "POST",
-                        f"{WB_MARKETPLACE}/api/v3/stocks/{wh_id}",
-                        json={"skus": chunk},
-                    )
-                    for item in data.get("stocks", []):
-                        sku = item.get("sku", "")
-                        qty = item.get("amount", 0)
-                        if sku:
-                            stock_map[sku] = stock_map.get(sku, 0) + qty
-                except Exception as e:
-                    logger.warning("Stocks for warehouse %s failed: %s", wh_id, e)
+        # Aggregate quantity by nmId across all warehouses
+        stock_map: dict[int, int] = {}
+        for item in items:
+            nm_id = item.get("nmId")
+            qty = item.get("quantity", 0)
+            if nm_id:
+                stock_map[nm_id] = stock_map.get(nm_id, 0) + qty
 
-        logger.info("Fetched stocks from %d warehouses, %d SKUs", len(warehouses), len(stock_map))
+        logger.info("Fetched stocks for %d products via Statistics API", len(stock_map))
         return stock_map
 
     async def get_orders(self, date_from: str) -> list[dict[str, Any]]:

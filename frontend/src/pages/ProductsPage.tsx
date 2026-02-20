@@ -357,18 +357,26 @@ export default function ProductsPage() {
         loading={loading}
         size="middle"
         scroll={{ x: 1600 }}
-        onChange={(_pagination, _filters, sorter) => {
+        onChange={(pagination, _filters, sorter) => {
+          // Обновляем страницу из пагинации
+          if (pagination.current) {
+            setPage(pagination.current);
+          }
+          // Обновляем сортировку — сброс на стр.1 только при смене сортировки
           if (!Array.isArray(sorter)) {
-            setSortField(sorter.order ? (sorter.field as string) : null);
-            setSortOrder(sorter.order || null);
-            setPage(1);
+            const newField = sorter.order ? (sorter.field as string) : null;
+            const newOrder = sorter.order || null;
+            if (newField !== sortField || newOrder !== sortOrder) {
+              setSortField(newField);
+              setSortOrder(newOrder);
+              setPage(1);
+            }
           }
         }}
         pagination={{
           current: page,
           pageSize,
           total,
-          onChange: setPage,
           showTotal: (t) => `Всего ${t} товаров`,
           showSizeChanger: false,
         }}
