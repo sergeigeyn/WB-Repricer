@@ -23,6 +23,7 @@ WB_STATISTICS = "https://statistics-api.wildberries.ru"
 WB_MARKETPLACE = "https://marketplace-api.wildberries.ru"
 WB_ADVERT = "https://advert-api.wildberries.ru"
 WB_COMMON = "https://common-api.wildberries.ru"
+WB_ANALYTICS = "https://seller-analytics-api.wildberries.ru"
 
 
 class BaseWBClient(ABC):
@@ -241,12 +242,12 @@ class WBApiClient(BaseWBClient):
         """Fetch paid storage data per product per warehouse per day.
 
         Returns list of storage entries with nmId, warehousePrice, storagePricePerBarcode, etc.
-        Uses Statistics API /api/v1/paid/storage.
+        Uses Seller Analytics API /api/v1/paid_storage.
         """
         data = await self._request_with_timeout(
             60.0,
             "GET",
-            f"{WB_STATISTICS}/api/v1/paid/storage",
+            f"{WB_ANALYTICS}/api/v1/paid_storage",
             params={"dateFrom": date_from},
         )
         items = data if isinstance(data, list) else []
