@@ -20,6 +20,7 @@ class ProductResponse(BaseModel):
     title: str | None
     image_url: str | None
     cost_price: float | None
+    tag: str | None = None
     total_stock: int = 0
     is_active: bool
     is_locomotive: bool
@@ -56,3 +57,4 @@ class ProductCostUpdate(BaseModel):
     cost_price: float | None = None
     ad_pct: float | None = None
     extra_costs: list[ExtraCostItem] | None = None
+    tag: str | None = None

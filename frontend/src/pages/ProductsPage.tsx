@@ -24,7 +24,6 @@ import {
   PlusOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
-import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
 import apiClient from '@/api/client';
 
@@ -43,6 +42,7 @@ interface Product {
   title: string | null;
   image_url: string | null;
   cost_price: number | null;
+  tag: string | null;
   current_price: number | null;
   discount_pct: number | null;
   final_price: number | null;
@@ -187,7 +187,7 @@ export default function ProductsPage() {
     },
   };
 
-  const handleUpdateCost = async (productId: number, field: string, value: number | null) => {
+  const handleUpdateCost = async (productId: number, field: string, value: number | string | null) => {
     try {
       const { data } = await apiClient.put(`/products/${productId}/cost`, { [field]: value });
       setProducts((prev) =>
@@ -232,7 +232,8 @@ export default function ProductsPage() {
     return `${val.toLocaleString('ru-RU')} ₽`;
   };
 
-  const columns: ColumnsType<Product> = [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const columns: any[] = [
     // --- Товар (без группировки) ---
     {
       title: 'Фото',
@@ -270,6 +271,28 @@ export default function ProductsPage() {
       width: 100,
       render: (brand: string | null) =>
         brand ? <Tag color="blue">{brand}</Tag> : '—',
+    },
+    {
+      title: 'Тэг',
+      dataIndex: 'tag',
+      key: 'tag',
+      width: 90,
+      render: (_: string | null, record: Product) => (
+        <Input
+          size="small"
+          placeholder="—"
+          defaultValue={record.tag || ''}
+          onBlur={(e) => {
+            const val = e.target.value.trim();
+            if (val !== (record.tag || '')) handleUpdateCost(record.id, 'tag', val as any);
+          }}
+          onPressEnter={(e) => {
+            const val = (e.target as HTMLInputElement).value.trim();
+            if (val !== (record.tag || '')) handleUpdateCost(record.id, 'tag', val as any);
+          }}
+          style={{ width: 75 }}
+        />
+      ),
     },
     // --- Наличие ---
     {

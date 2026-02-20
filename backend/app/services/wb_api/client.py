@@ -237,6 +237,22 @@ class WBApiClient(BaseWBClient):
         logger.info("Fetched commission rates for %d categories", len(result))
         return result
 
+    async def get_paid_storage(self, date_from: str) -> list[dict[str, Any]]:
+        """Fetch paid storage data per product per warehouse per day.
+
+        Returns list of storage entries with nmId, warehousePrice, storagePricePerBarcode, etc.
+        Uses Statistics API /api/v1/paid/storage.
+        """
+        data = await self._request_with_timeout(
+            60.0,
+            "GET",
+            f"{WB_STATISTICS}/api/v1/paid/storage",
+            params={"dateFrom": date_from},
+        )
+        items = data if isinstance(data, list) else []
+        logger.info("Fetched %d paid storage entries from WB", len(items))
+        return items
+
     async def get_box_tariffs(self) -> dict[str, Any]:
         """Fetch box delivery and storage tariffs.
 

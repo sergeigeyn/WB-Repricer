@@ -141,6 +141,7 @@ async def _enrich_with_prices(
                 title=p.title,
                 image_url=p.image_url,
                 cost_price=cost_price,
+                tag=p.tag,
                 total_stock=p.total_stock,
                 is_active=p.is_active,
                 is_locomotive=p.is_locomotive,
@@ -431,6 +432,8 @@ async def update_product_cost(
         product.extra_costs_json = json_module.dumps(
             [item.model_dump() for item in data.extra_costs]
         )
+    if data.tag is not None:
+        product.tag = data.tag if data.tag.strip() else None
 
     enriched = await _enrich_with_prices(db, [product])
     return enriched[0]

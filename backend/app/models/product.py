@@ -44,6 +44,7 @@ class Product(Base):
     ad_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))  # Advertising % of revenue
     spp_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))  # Average SPP % (auto from WB)
     extra_costs_json: Mapped[str | None] = mapped_column(Text)  # JSON list of {name, value, type}
+    tag: Mapped[str | None] = mapped_column(String(100))  # User-defined tag for grouping
     total_stock: Mapped[int] = mapped_column(default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
     is_locomotive: Mapped[bool] = mapped_column(default=False)
