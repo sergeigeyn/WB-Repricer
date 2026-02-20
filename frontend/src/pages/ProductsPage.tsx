@@ -43,7 +43,7 @@ export default function ProductsPage() {
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string | number> = {
+      const params: Record<string, string | number | boolean> = {
         skip: (page - 1) * pageSize,
         limit: pageSize,
       };
