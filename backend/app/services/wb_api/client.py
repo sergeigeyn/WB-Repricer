@@ -63,7 +63,8 @@ class WBApiClient(BaseWBClient):
     async def get_products(self) -> list[dict[str, Any]]:
         """Fetch all product cards via Content API with cursor pagination."""
         all_cards: list[dict[str, Any]] = []
-        cursor: dict[str, Any] = {"limit": 100, "updatedAt": "", "nmID": 0}
+        # First request: no updatedAt/nmID (WB rejects empty string for updatedAt)
+        cursor: dict[str, Any] = {"limit": 100}
 
         while True:
             data = await self._request(
@@ -83,8 +84,12 @@ class WBApiClient(BaseWBClient):
             total = new_cursor.get("total", 0)
             if not cards or len(all_cards) >= total:
                 break
-            cursor["updatedAt"] = new_cursor.get("updatedAt", "")
-            cursor["nmID"] = new_cursor.get("nmID", 0)
+            # For subsequent pages, include cursor fields from response
+            cursor = {
+                "limit": 100,
+                "updatedAt": new_cursor.get("updatedAt", ""),
+                "nmID": new_cursor.get("nmID", 0),
+            }
 
         logger.info("Fetched %d product cards from WB", len(all_cards))
         return all_cards
