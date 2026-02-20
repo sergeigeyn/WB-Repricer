@@ -33,6 +33,7 @@ class Product(Base):
     category: Mapped[str | None] = mapped_column(String(255), index=True)
     title: Mapped[str | None] = mapped_column(String(500))
     image_url: Mapped[str | None] = mapped_column(String(500))
+    barcode: Mapped[str | None] = mapped_column(String(50), index=True)
     cost_price: Mapped[float | None] = mapped_column(Numeric(12, 2))
     tax_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))
     extra_costs_json: Mapped[str | None] = mapped_column(Text)  # JSON

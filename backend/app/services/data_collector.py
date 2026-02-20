@@ -46,6 +46,14 @@ async def sync_products(db: AsyncSession, client: WBApiClient, account_id: int) 
         photos = card.get("photos", [])
         image_url = photos[0].get("big") if photos else None
 
+        # Extract first barcode from sizes
+        sizes = card.get("sizes", [])
+        barcode = None
+        if sizes:
+            skus = sizes[0].get("skus", [])
+            if skus:
+                barcode = skus[0]
+
         if product:
             # Update existing product
             product.title = card.get("title") or product.title
@@ -54,6 +62,8 @@ async def sync_products(db: AsyncSession, client: WBApiClient, account_id: int) 
             product.category = card.get("subjectName") or product.category
             if image_url:
                 product.image_url = image_url
+            if barcode:
+                product.barcode = barcode
         else:
             # Create new product
             product = Product(
@@ -64,6 +74,7 @@ async def sync_products(db: AsyncSession, client: WBApiClient, account_id: int) 
                 category=card.get("subjectName"),
                 title=card.get("title"),
                 image_url=image_url,
+                barcode=barcode,
                 is_active=True,
             )
             db.add(product)
@@ -132,27 +143,38 @@ async def sync_stocks(db: AsyncSession, client: WBApiClient, account_id: int) ->
 
     Returns number of products with updated stock.
     """
+    # Get products with barcodes for this account
+    result = await db.execute(
+        select(Product).where(
+            Product.account_id == account_id,
+            Product.barcode.is_not(None),
+        )
+    )
+    products = list(result.scalars().all())
+    if not products:
+        logger.info("No products with barcodes for account %d", account_id)
+        return 0
+
+    barcode_to_product = {p.barcode: p for p in products}
+    barcodes = list(barcode_to_product.keys())
+
     try:
-        stock_map = await client.get_stocks()
+        stock_map = await client.get_stocks(barcodes)
     except Exception as e:
         logger.warning("Failed to fetch stocks: %s", e)
         return 0
 
-    if not stock_map:
-        logger.info("No stock data from warehouses for account %d", account_id)
-        return 0
-
-    # Get products for this account
-    result = await db.execute(
-        select(Product).where(Product.account_id == account_id)
-    )
-    products = list(result.scalars().all())
     updated = 0
-
-    for product in products:
-        qty = stock_map.get(product.nm_id, 0)
-        if product.total_stock != qty:
+    for barcode, qty in stock_map.items():
+        product = barcode_to_product.get(barcode)
+        if product and product.total_stock != qty:
             product.total_stock = qty
+            updated += 1
+
+    # Set stock to 0 for products not in stock_map
+    for barcode, product in barcode_to_product.items():
+        if barcode not in stock_map and product.total_stock != 0:
+            product.total_stock = 0
             updated += 1
 
     await db.flush()
