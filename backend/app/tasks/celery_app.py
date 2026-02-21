@@ -75,5 +75,16 @@ def collect_promotions():
 
 @celery_app.task(name="app.tasks.price_updater.run_all_strategies")
 def run_all_strategies():
-    """Placeholder: execute all active pricing strategies."""
-    return {"status": "ok", "task": "run_all_strategies"}
+    """Execute all active pricing strategies."""
+    import asyncio
+
+    from app.services.strategies.runner import run_all_active_strategies
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(
+            run_all_active_strategies(triggered_by="schedule")
+        )
+        return result
+    finally:
+        loop.close()

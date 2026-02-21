@@ -6,6 +6,8 @@ import DashboardPage from '@/pages/DashboardPage';
 import ProductsPage from '@/pages/ProductsPage';
 import PromotionsPage from '@/pages/PromotionsPage';
 import PromotionDetailPage from '@/pages/PromotionDetailPage';
+import StrategiesPage from '@/pages/StrategiesPage';
+import StrategyDetailPage from '@/pages/StrategyDetailPage';
 import SettingsPage from '@/pages/SettingsPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -28,6 +30,8 @@ export default function App() {
                 <Route path="/products" element={<ProductsPage />} />
                 <Route path="/promotions" element={<PromotionsPage />} />
                 <Route path="/promotions/:id" element={<PromotionDetailPage />} />
+                <Route path="/strategies" element={<StrategiesPage />} />
+                <Route path="/strategies/:id" element={<StrategyDetailPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </AppLayout>
