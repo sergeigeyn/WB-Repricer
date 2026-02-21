@@ -238,6 +238,14 @@ async def get_strategy_detail(
                 prod = products_map.get(ph.product_id)
                 if not prod:
                     continue
+                # Infer alert_level from change_reason
+                alert_level = None
+                reason = ph.change_reason or ""
+                if "КРИТИЧНО" in reason:
+                    alert_level = "critical"
+                elif "Предупреждение" in reason:
+                    alert_level = "warning"
+
                 recommendations.append(
                     StrategyRecommendation(
                         product_id=ph.product_id,
@@ -260,7 +268,7 @@ async def get_strategy_detail(
                         ),
                         new_margin_pct=float(ph.margin_pct) if ph.margin_pct else None,
                         new_margin_rub=float(ph.margin_rub) if ph.margin_rub else None,
-                        alert_level=None,
+                        alert_level=alert_level,
                         reason=ph.change_reason,
                         is_applied=ph.is_applied,
                     )
