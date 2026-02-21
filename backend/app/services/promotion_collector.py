@@ -1,5 +1,6 @@
 """Promotion Collector: sync promotions and calculate promo margins."""
 
+import asyncio
 import json as json_module
 import logging
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -185,6 +186,8 @@ async def sync_promotion_products(
 
     Returns number of products synced.
     """
+    # Rate limit: 10 requests per 6 seconds — wait before each promotion
+    await asyncio.sleep(1.5)
     try:
         nomenclatures = await client.get_promotion_nomenclatures(int(wb_promo_id))
     except Exception as e:

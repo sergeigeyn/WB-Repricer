@@ -356,25 +356,38 @@ class WBApiClient(BaseWBClient):
     async def get_promotion_nomenclatures(self, promo_id: int) -> list[dict[str, Any]]:
         """Fetch nomenclatures (products) eligible for a promotion.
 
+        Fetches both inAction=true and inAction=false to get full picture.
         Returns list of dicts with nmID, planPrice, planDiscount, inAction, currentPrice.
         Uses limit/offset pagination (default 1000 per page).
         """
         all_items: list[dict[str, Any]] = []
-        offset = 0
-        limit = 1000
+        seen_nms: set[int] = set()
 
-        while True:
-            data = await self._request(
-                "GET",
-                f"{WB_CALENDAR}/api/v1/calendar/promotions/nomenclatures",
-                params={"promotionID": promo_id, "inAction": "false", "limit": limit, "offset": offset},
-            )
-            items = data.get("data", {}).get("nomenclatures", []) if isinstance(data, dict) else []
-            all_items.extend(items)
+        for in_action_val in ["true", "false"]:
+            offset = 0
+            limit = 1000
+            while True:
+                try:
+                    data = await self._request(
+                        "GET",
+                        f"{WB_CALENDAR}/api/v1/calendar/promotions/nomenclatures",
+                        params={"promotionID": promo_id, "inAction": in_action_val, "limit": limit, "offset": offset},
+                    )
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 422:
+                        # Some promotions don't support nomenclature queries
+                        break
+                    raise
+                items = data.get("data", {}).get("nomenclatures", []) if isinstance(data, dict) else []
+                for item in items:
+                    nm = item.get("nmID")
+                    if nm and nm not in seen_nms:
+                        seen_nms.add(nm)
+                        all_items.append(item)
 
-            if len(items) < limit:
-                break
-            offset += limit
+                if len(items) < limit:
+                    break
+                offset += limit
 
         logger.info("Fetched %d nomenclatures for promotion %d", len(all_items), promo_id)
         return all_items
