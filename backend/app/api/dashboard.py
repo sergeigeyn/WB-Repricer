@@ -32,10 +32,11 @@ def _period_range(period: str) -> tuple[date, date, date, date]:
     """Return (start, end, prev_start, prev_end) for given period string."""
     today = datetime.now(MSK).date()
     if period == "today":
-        start = today
-        end = today + timedelta(days=1)
-        prev_start = today - timedelta(days=1)
-        prev_end = today
+        # "Вчера" — последний полный день (сегодняшние данные ещё не синхронизированы)
+        start = today - timedelta(days=1)
+        end = today
+        prev_start = today - timedelta(days=2)
+        prev_end = start
     elif period == "30d":
         start = today - timedelta(days=30)
         end = today

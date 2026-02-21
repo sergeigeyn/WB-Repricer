@@ -111,7 +111,7 @@ function formatDate(d: string | null): string {
 }
 
 const periodLabels: Record<string, string> = {
-  today: 'Сегодня',
+  today: 'Вчера',
   '7d': '7 дней',
   '30d': '30 дней',
 };
@@ -210,7 +210,7 @@ export default function DashboardPage() {
         <Space>
           <Segmented
             options={[
-              { label: 'Сегодня', value: 'today' },
+              { label: 'Вчера', value: 'today' },
               { label: '7 дней', value: '7d' },
               { label: '30 дней', value: '30d' },
             ]}
