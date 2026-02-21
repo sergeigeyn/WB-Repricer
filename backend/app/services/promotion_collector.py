@@ -117,6 +117,7 @@ async def sync_promotions(
 
     now = datetime.now(UTC)
     synced = 0
+    skipped = 0
 
     for p in promos:
         wb_id = str(p.get("id", ""))
@@ -130,6 +131,11 @@ async def sync_promotions(
         in_action_count = p.get("inPromoActionLeftCount", 0) or 0
         total_available = p.get("inPromoActionTotalCount", 0) or 0
         status = _determine_status(start_date, end_date)
+
+        # Skip promotions where none of our products can participate
+        if total_available == 0 and in_action_count == 0:
+            skipped += 1
+            continue
 
         # Upsert by wb_promo_id
         result = await db.execute(
@@ -164,7 +170,10 @@ async def sync_promotions(
         synced += 1
 
     await db.flush()
-    logger.info("Synced %d promotions for account %d", synced, account_id)
+    logger.info(
+        "Synced %d promotions for account %d (skipped %d with no eligible products, %d total from API)",
+        synced, account_id, skipped, len(promos),
+    )
     return synced
 
 
