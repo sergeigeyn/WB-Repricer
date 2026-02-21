@@ -265,24 +265,42 @@ async def import_promotion(
     if not rows:
         raise HTTPException(status_code=400, detail="File is empty or has no data rows")
 
+    # Handle WB special case: file with only "Товар уже участвует в акции" header
+    first_keys = list(rows[0].keys()) if rows else []
+    if first_keys and any("уже участвует" in k for k in first_keys):
+        raise HTTPException(
+            status_code=400,
+            detail="Все товары уже участвуют в акции. Файл от WB не содержит данных для импорта.",
+        )
+
     # Column aliases → internal field names
+    # Covers official WB Calendar export + common variations
     aliases = {
+        # nm_id
         "артикул wb": "nm_id", "артикул вб": "nm_id", "артикул": "nm_id",
         "nmid": "nm_id", "nm_id": "nm_id", "nm id": "nm_id",
         "код номенклатуры": "nm_id", "номенклатура": "nm_id",
+        "артикул wildberries": "nm_id",
+        # plan_price (WB: "Плановая цена" — red highlight)
         "плановая цена": "plan_price", "план цена": "plan_price",
         "planprice": "plan_price", "plan_price": "plan_price",
         "акционная цена": "plan_price", "цена акции": "plan_price",
         "цена для акции": "plan_price", "загруженная цена": "plan_price",
+        "плановая акционная цена": "plan_price",
+        # plan_discount (WB: "Загружаемая скидка" — green highlight)
         "плановая скидка": "plan_discount", "скидка акции": "plan_discount",
         "скидка акции %": "plan_discount", "plandiscount": "plan_discount",
         "plan_discount": "plan_discount", "скидка для акции": "plan_discount",
+        "загружаемая скидка": "plan_discount",
+        # current_price
         "текущая цена": "current_price", "currentprice": "current_price",
         "current_price": "current_price", "цена до скидки": "current_price",
-        "цена": "current_price",
+        "цена": "current_price", "текущая розничная цена": "current_price",
+        "текущая цена до скидки": "current_price",
+        # in_action (WB: "Участие в акции" — Да/Нет)
         "участвует": "in_action", "в акции": "in_action",
         "inaction": "in_action", "in_action": "in_action",
-        "статус участия": "in_action",
+        "статус участия": "in_action", "участие в акции": "in_action",
     }
 
     normalized_rows = []
