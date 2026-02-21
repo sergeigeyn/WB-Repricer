@@ -315,10 +315,24 @@ class WBApiClient(BaseWBClient):
     async def get_promotions(self) -> list[dict[str, Any]]:
         """Fetch list of available promotions from WB Calendar API.
 
+        Requires params: allPromo, startDateTime, endDateTime (RFC3339).
         Returns list of promotions with id, name, dates, type, counts.
         """
+        from datetime import datetime as dt, timedelta, timezone
+        now = dt.now(timezone.utc)
+        # Fetch promotions from 3 months ago to 3 months ahead
+        start = (now - timedelta(days=90)).strftime("%Y-%m-%dT00:00:00Z")
+        end = (now + timedelta(days=90)).strftime("%Y-%m-%dT23:59:59Z")
+
         data = await self._request(
             "GET", f"{WB_CALENDAR}/api/v1/calendar/promotions",
+            params={
+                "allPromo": "true",
+                "startDateTime": start,
+                "endDateTime": end,
+                "limit": 1000,
+                "offset": 0,
+            },
         )
         promotions = data.get("data", {}).get("promotions", []) if isinstance(data, dict) else []
         logger.info("Fetched %d promotions from WB Calendar API", len(promotions))
@@ -335,9 +349,9 @@ class WBApiClient(BaseWBClient):
         data = await self._request(
             "GET",
             f"{WB_CALENDAR}/api/v1/calendar/promotions/details",
-            params={"promotionID": promo_id},
+            params={"promotionIDs": promo_id},
         )
-        return data.get("data", {}).get("promotion", {}) if isinstance(data, dict) else {}
+        return data.get("data", {}).get("promotions", [{}])[0] if isinstance(data, dict) else {}
 
     async def get_promotion_nomenclatures(self, promo_id: int) -> list[dict[str, Any]]:
         """Fetch nomenclatures (products) eligible for a promotion.
@@ -353,7 +367,7 @@ class WBApiClient(BaseWBClient):
             data = await self._request(
                 "GET",
                 f"{WB_CALENDAR}/api/v1/calendar/promotions/nomenclatures",
-                params={"promotionID": promo_id, "limit": limit, "offset": offset},
+                params={"promotionID": promo_id, "inAction": "false", "limit": limit, "offset": offset},
             )
             items = data.get("data", {}).get("nomenclatures", []) if isinstance(data, dict) else []
             all_items.extend(items)
