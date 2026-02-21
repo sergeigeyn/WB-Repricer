@@ -32,7 +32,13 @@ def _period_range(period: str) -> tuple[date, date, date, date]:
     """Return (start, end, prev_start, prev_end) for given period string."""
     today = datetime.now(MSK).date()
     if period == "today":
-        # "Вчера" — последний полный день (сегодняшние данные ещё не синхронизированы)
+        # Сегодня (включая текущий день — данные обновляются каждые 15 мин)
+        start = today
+        end = today + timedelta(days=1)
+        prev_start = today - timedelta(days=1)
+        prev_end = today
+    elif period == "yesterday":
+        # Вчера — последний полный день
         start = today - timedelta(days=1)
         end = today
         prev_start = today - timedelta(days=2)
@@ -121,7 +127,7 @@ async def get_dashboard(
     _current_user: User = Depends(get_current_user),
 ):
     """Get dashboard KPIs, alerts, promotions, and top products."""
-    if period not in ("today", "7d", "30d"):
+    if period not in ("today", "yesterday", "7d", "30d"):
         period = "7d"
 
     start, end, prev_start, prev_end = _period_range(period)

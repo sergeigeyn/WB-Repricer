@@ -42,10 +42,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.price_updater.run_all_strategies",
         "schedule": crontab(hour=15, minute=30),
     },
-    # Collect orders every 4 hours
+    # Collect orders every 15 minutes (keep today's data fresh)
     "collect-orders": {
         "task": "app.tasks.data_collector.collect_orders",
-        "schedule": crontab(hour="*/4", minute=15),
+        "schedule": crontab(minute="*/15"),
     },
     # Collect promotions once a day
     "collect-promotions": {
@@ -63,8 +63,17 @@ def collect_all_data():
 
 @celery_app.task(name="app.tasks.data_collector.collect_orders")
 def collect_orders():
-    """Placeholder: collect orders from WB API."""
-    return {"status": "ok", "task": "collect_orders"}
+    """Sync orders from WB Statistics API (lightweight, runs every 15 min)."""
+    import asyncio
+
+    from app.services.data_collector import collect_orders_only
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(collect_orders_only())
+        return result
+    finally:
+        loop.close()
 
 
 @celery_app.task(name="app.tasks.data_collector.collect_promotions")

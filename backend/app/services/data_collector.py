@@ -508,6 +508,34 @@ async def sync_paid_storage(db: AsyncSession, client: WBApiClient, account_id: i
     return updated
 
 
+async def collect_orders_only() -> dict:
+    """Lightweight sync: only orders from WB Statistics API.
+
+    Designed to run frequently (every 15 min) to keep today's data fresh.
+    """
+    results = {"accounts": 0, "orders_synced": 0, "errors": []}
+
+    async with async_session() as db:
+        accounts = await _get_active_accounts(db)
+        results["accounts"] = len(accounts)
+
+        for account in accounts:
+            try:
+                api_key = decrypt_api_key(account.api_key_encrypted)
+                client = WBApiClient(api_key)
+                orders_count = await sync_orders(db, client, account.id)
+                results["orders_synced"] += orders_count
+            except Exception as e:
+                error_msg = f"Account {account.id}: {e}"
+                logger.warning("Orders sync failed: %s", error_msg)
+                results["errors"].append(error_msg)
+
+        await db.commit()
+
+    logger.info("Orders sync complete: %d accounts, %d records", results["accounts"], results["orders_synced"])
+    return results
+
+
 async def collect_all() -> dict:
     """Main entry point: collect products, prices and stocks for all active WB accounts.
 
