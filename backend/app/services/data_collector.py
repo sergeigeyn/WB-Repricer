@@ -1,5 +1,6 @@
 """Data Collector: sync products and prices from WB API into the database."""
 
+import asyncio
 import logging
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -429,9 +430,13 @@ async def sync_paid_storage(db: AsyncSession, client: WBApiClient, account_id: i
     chunk_days = 8
 
     # Fetch in 8-day chunks (WB max period per request)
+    # Delay between chunks to avoid 429 on download endpoint
     entries: list[dict] = []
     chunk_start = now_msk - timedelta(days=period_days)
+    chunk_num = 0
     while chunk_start < now_msk:
+        if chunk_num > 0:
+            await asyncio.sleep(15)
         chunk_end = min(chunk_start + timedelta(days=chunk_days), now_msk)
         date_from = chunk_start.strftime("%Y-%m-%d")
         date_to = chunk_end.strftime("%Y-%m-%d")
@@ -441,6 +446,7 @@ async def sync_paid_storage(db: AsyncSession, client: WBApiClient, account_id: i
         except Exception as e:
             logger.warning("Failed to fetch paid storage for %s — %s: %s", date_from, date_to, e)
         chunk_start = chunk_end
+        chunk_num += 1
 
     if not entries:
         logger.info("No paid storage data for account %d", account_id)

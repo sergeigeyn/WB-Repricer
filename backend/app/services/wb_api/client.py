@@ -283,15 +283,25 @@ class WBApiClient(BaseWBClient):
             logger.warning("Paid storage task %s timed out waiting for completion", task_id)
             return []
 
-        # Step 3: Download results
-        items = await self._request_with_timeout(
-            120.0,
-            "GET",
-            f"{WB_ANALYTICS}/api/v1/paid_storage/tasks/{task_id}/download",
-        )
-        result = items if isinstance(items, list) else []
-        logger.info("Fetched %d paid storage entries from WB (period %s — %s)", len(result), date_from, date_to)
-        return result
+        # Step 3: Download results (with retry on 429)
+        for attempt in range(3):
+            try:
+                items = await self._request_with_timeout(
+                    120.0,
+                    "GET",
+                    f"{WB_ANALYTICS}/api/v1/paid_storage/tasks/{task_id}/download",
+                )
+                result = items if isinstance(items, list) else []
+                logger.info("Fetched %d paid storage entries from WB (period %s — %s)", len(result), date_from, date_to)
+                return result
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < 2:
+                    wait = 15 * (attempt + 1)
+                    logger.warning("Paid storage download 429, retrying in %ds (attempt %d/3)", wait, attempt + 1)
+                    await asyncio.sleep(wait)
+                else:
+                    raise
+        return []
 
     async def get_box_tariffs(self) -> dict[str, Any]:
         """Fetch box delivery and storage tariffs.
