@@ -616,25 +616,23 @@ async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id:
 
     upserted = 0
     for item in report_data:
-        nm_id = item.get("nmID")
+        # v3 response: {"product": {"nmId": ...}, "history": [...]}
+        product_info = item.get("product", {})
+        nm_id = product_info.get("nmId") or item.get("nmID")
         product_id = nm_to_pid.get(nm_id)
         if not product_id:
             continue
 
-        # v3 Sales Funnel response: each item has "history" array with daily data
         history = item.get("history", [])
         for day in history:
-            dt_str = day.get("dt", "")
+            # v3 uses "date" field in YYYY-MM-DD format
+            dt_str = day.get("date", "") or day.get("dt", "")
             if not dt_str:
                 continue
             try:
-                day_date = datetime.fromisoformat(dt_str.replace("Z", "+00:00")).date()
+                day_date = datetime.strptime(dt_str[:10], "%Y-%m-%d").date()
             except (ValueError, AttributeError):
-                try:
-                    # Fallback: try YYYY-MM-DD format
-                    day_date = datetime.strptime(dt_str[:10], "%Y-%m-%d").date()
-                except (ValueError, AttributeError):
-                    continue
+                continue
 
             result = await db.execute(
                 select(CardAnalyticsDaily).where(
@@ -644,15 +642,16 @@ async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id:
             )
             existing = result.scalar_one_or_none()
 
+            # v3 field names: openCount, cartCount, orderCount, etc.
             values = {
-                "open_card_count": day.get("openCardCount", 0) or 0,
-                "add_to_cart_count": day.get("addToCartCount", 0) or 0,
-                "orders_count": day.get("ordersCount", 0) or 0,
-                "orders_sum_rub": day.get("ordersSumRub", 0) or 0,
-                "buyouts_count": day.get("buyoutsCount", 0) or 0,
-                "buyouts_sum_rub": day.get("buyoutsSumRub", 0) or 0,
+                "open_card_count": day.get("openCount", 0) or 0,
+                "add_to_cart_count": day.get("cartCount", 0) or 0,
+                "orders_count": day.get("orderCount", 0) or 0,
+                "orders_sum_rub": day.get("orderSum", 0) or 0,
+                "buyouts_count": day.get("buyoutCount", 0) or 0,
+                "buyouts_sum_rub": day.get("buyoutSum", 0) or 0,
                 "cancel_count": day.get("cancelCount", 0) or 0,
-                "cancel_sum_rub": day.get("cancelSumRub", 0) or 0,
+                "cancel_sum_rub": day.get("cancelSum", 0) or 0,
                 "add_to_cart_conversion": day.get("addToCartConversion"),
                 "cart_to_order_conversion": day.get("cartToOrderConversion"),
                 "buyout_percent": day.get("buyoutPercent"),
