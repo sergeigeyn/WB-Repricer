@@ -95,17 +95,20 @@ async def _calc_period_totals(
     end: date,
     product_prices: dict[int, float],
     product_margins: dict[int, float],
+    product_ids: set[int] | None = None,
 ) -> tuple[int, float, float]:
     """Calculate total orders, revenue, profit for a period."""
-    result = await db.execute(
+    query = (
         select(
             SalesDaily.product_id,
             func.sum(SalesDaily.orders_count),
             func.sum(SalesDaily.returns_count),
         )
         .where(SalesDaily.date >= start, SalesDaily.date < end)
-        .group_by(SalesDaily.product_id)
     )
+    if product_ids is not None:
+        query = query.where(SalesDaily.product_id.in_(product_ids))
+    result = await db.execute(query.group_by(SalesDaily.product_id))
     total_orders = 0
     total_revenue = 0.0
     total_profit = 0.0
@@ -123,10 +126,15 @@ async def _calc_period_totals(
 @router.get("", response_model=DashboardResponse)
 async def get_dashboard(
     period: str = "7d",
+    account_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
-    """Get dashboard KPIs, alerts, promotions, and top products."""
+    """Get dashboard KPIs, alerts, promotions, and top products.
+
+    If account_id is provided, filter by that account.
+    If account_id is None, show data for all accounts combined.
+    """
     if period not in ("today", "yesterday", "7d", "30d"):
         period = "7d"
 
@@ -134,8 +142,11 @@ async def get_dashboard(
     today = datetime.now(MSK).date()
     today_start = datetime(today.year, today.month, today.day, tzinfo=MSK)
 
-    # --- Load all active products ---
-    prod_result = await db.execute(select(Product))
+    # --- Load products (filtered by account if specified) ---
+    prod_query = select(Product)
+    if account_id is not None:
+        prod_query = prod_query.where(Product.account_id == account_id)
+    prod_result = await db.execute(prod_query)
     all_products = list(prod_result.scalars().all())
     product_map = {p.id: p for p in all_products}
 
@@ -198,11 +209,12 @@ async def get_dashboard(
             product_margin_pcts[p.id] = m_pct
 
     # --- KPI: Orders, Revenue, Profit ---
+    pid_set = {p.id for p in all_products} if account_id is not None else None
     cur_orders, cur_revenue, cur_profit = await _calc_period_totals(
-        db, start, end, product_prices, product_margins
+        db, start, end, product_prices, product_margins, pid_set
     )
     prev_orders, prev_revenue, prev_profit = await _calc_period_totals(
-        db, prev_start, prev_end, product_prices, product_margins
+        db, prev_start, prev_end, product_prices, product_margins, pid_set
     )
 
     def _pct_change(cur: float, prev: float) -> float | None:
@@ -220,9 +232,10 @@ async def get_dashboard(
     total_stock = sum(p.total_stock or 0 for p in all_products)
 
     # Price changes today
-    pc_result = await db.execute(
-        select(func.count(PriceHistory.id)).where(PriceHistory.created_at >= today_start)
-    )
+    pc_query = select(func.count(PriceHistory.id)).where(PriceHistory.created_at >= today_start)
+    if pid_set is not None:
+        pc_query = pc_query.where(PriceHistory.product_id.in_(pid_set))
+    pc_result = await db.execute(pc_query)
     price_changes_today = pc_result.scalar() or 0
 
     kpi = DashboardKPI(
@@ -289,12 +302,15 @@ async def get_dashboard(
     )
 
     # --- Active promotions ---
-    promo_result = await db.execute(
+    promo_query = (
         select(Promotion)
         .where(Promotion.status.in_(["active", "upcoming"]), Promotion.is_active == True)  # noqa: E712
         .order_by(Promotion.start_date.asc())
         .limit(5)
     )
+    if account_id is not None:
+        promo_query = promo_query.where(Promotion.account_id == account_id)
+    promo_result = await db.execute(promo_query)
     promos = list(promo_result.scalars().all())
 
     active_promotions: list[DashboardPromotion] = []
@@ -322,13 +338,18 @@ async def get_dashboard(
         ))
 
     # --- Top products by orders ---
-    top_q = await db.execute(
+    top_query = (
         select(
             SalesDaily.product_id,
             func.sum(SalesDaily.orders_count).label("total_orders"),
             func.sum(SalesDaily.returns_count).label("total_returns"),
         )
         .where(SalesDaily.date >= start, SalesDaily.date < end)
+    )
+    if pid_set is not None:
+        top_query = top_query.where(SalesDaily.product_id.in_(pid_set))
+    top_q = await db.execute(
+        top_query
         .group_by(SalesDaily.product_id)
         .order_by(func.sum(SalesDaily.orders_count).desc())
         .limit(10)
@@ -361,4 +382,5 @@ async def get_dashboard(
         products_without_strategy=without_strategy,
         products_without_cost=without_cost,
         period=period,
+        account_id=account_id,
     )

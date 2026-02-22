@@ -75,3 +75,4 @@ class DashboardResponse(BaseModel):
     products_without_strategy: int = 0
     products_without_cost: int = 0
     period: str = "7d"
+    account_id: int | None = None

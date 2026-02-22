@@ -8,6 +8,7 @@ import {
   message,
   Row,
   Segmented,
+  Select,
   Space,
   Spin,
   Statistic,
@@ -29,6 +30,7 @@ import {
   ReloadOutlined,
   TagOutlined,
   AppstoreOutlined,
+  ShopOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import apiClient from '@/api/client';
@@ -91,6 +93,13 @@ interface DashboardData {
   products_without_strategy: number;
   products_without_cost: number;
   period: string;
+  account_id: number | null;
+}
+
+interface WBAccount {
+  id: number;
+  name: string;
+  is_active: boolean;
 }
 
 // --- Helpers ---
@@ -124,11 +133,24 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<string>('7d');
+  const [accounts, setAccounts] = useState<WBAccount[]>([]);
+  const [accountId, setAccountId] = useState<number | null>(null);
 
-  const fetchDashboard = async (p: string) => {
+  const fetchAccounts = async () => {
+    try {
+      const res = await apiClient.get('/settings/wb-accounts');
+      setAccounts(res.data.items || []);
+    } catch {
+      // silently ignore — accounts selector just won't show
+    }
+  };
+
+  const fetchDashboard = async (p: string, accId: number | null = accountId) => {
     setLoading(true);
     try {
-      const res = await apiClient.get('/dashboard', { params: { period: p } });
+      const params: Record<string, string | number> = { period: p };
+      if (accId !== null) params.account_id = accId;
+      const res = await apiClient.get('/dashboard', { params });
       setData(res.data);
     } catch {
       message.error('Ошибка загрузки дашборда');
@@ -138,8 +160,12 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    fetchDashboard(period);
-  }, [period]);
+    fetchAccounts();
+  }, []);
+
+  useEffect(() => {
+    fetchDashboard(period, accountId);
+  }, [period, accountId]);
 
   const handlePeriodChange = (val: string | number) => {
     setPeriod(val as string);
@@ -206,8 +232,23 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
-        <Typography.Title level={3} style={{ margin: 0 }}>Дашборд</Typography.Title>
+      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }} wrap>
+        <Space>
+          <Typography.Title level={3} style={{ margin: 0 }}>Дашборд</Typography.Title>
+          {accounts.length > 1 && (
+            <Select
+              value={accountId}
+              onChange={(val) => setAccountId(val)}
+              style={{ minWidth: 200 }}
+              suffixIcon={<ShopOutlined />}
+            >
+              <Select.Option value={null}>Все кабинеты</Select.Option>
+              {accounts.map((acc) => (
+                <Select.Option key={acc.id} value={acc.id}>{acc.name}</Select.Option>
+              ))}
+            </Select>
+          )}
+        </Space>
         <Space>
           <Segmented
             options={[
@@ -219,7 +260,7 @@ export default function DashboardPage() {
             value={period}
             onChange={handlePeriodChange}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => fetchDashboard(period)} loading={loading}>
+          <Button icon={<ReloadOutlined />} onClick={() => fetchDashboard(period, accountId)} loading={loading}>
             Обновить
           </Button>
         </Space>
