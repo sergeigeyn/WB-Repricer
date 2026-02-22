@@ -23,7 +23,7 @@ import {
   InboxOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { DualAxes, Line, Column } from '@ant-design/charts';
+import { Line, Column } from '@ant-design/charts';
 import apiClient from '@/api/client';
 
 // --- Interfaces ---
@@ -127,34 +127,14 @@ export default function ProductAnalyticsPage() {
     );
   }
 
-  // --- Chart: Orders + Price (DualAxes) ---
-  const dualAxesData = (data?.daily_data || []).map((d) => ({
+  // --- Chart data: Orders bar chart ---
+  const ordersChartData = (data?.daily_data || []).map((d) => ({
     date: formatDate(d.date),
-    orders: d.net_orders,
-    returns: d.returns,
-    price: d.price,
-    spp_price: d.spp_price,
+    value: d.net_orders,
+    type: 'Заказы',
   }));
 
-  const dualAxesConfig = {
-    xField: 'date',
-    children: [
-      {
-        type: 'interval' as const,
-        yField: 'orders',
-        style: { fill: '#5B8FF9', fillOpacity: 0.8 },
-        axis: { y: { title: 'Заказы' } },
-      },
-      {
-        type: 'line' as const,
-        yField: 'price',
-        style: { stroke: '#E8684A', lineWidth: 2 },
-        axis: { y: { position: 'right' as const, title: 'Цена, ₽' } },
-      },
-    ],
-  };
-
-  // --- Chart: Price History (Line) ---
+  // --- Chart data: Price line (on same dates as orders) ---
   const priceLineData: { date: string; value: number; type: string }[] = [];
   for (const p of data?.price_history || []) {
     priceLineData.push({ date: formatDate(p.date), value: p.final_price, type: 'Цена' });
@@ -163,39 +143,17 @@ export default function ProductAnalyticsPage() {
     }
   }
 
-  const priceLineConfig = {
-    data: priceLineData,
-    xField: 'date',
-    yField: 'value',
-    colorField: 'type',
-    style: { lineWidth: 2 },
-    axis: { y: { title: '₽' } },
-    scale: { color: { range: ['#E8684A', '#5AD8A6'] } },
-  };
-
   // --- Chart: Orders by Price (Column) ---
-  const ordersByPriceConfig = {
-    data: (data?.orders_by_price || []).map((b) => ({
-      price: `${formatPrice(b.price)} ₽`,
-      orders: b.orders_count,
-    })),
-    xField: 'price',
-    yField: 'orders',
-    style: { fill: '#5B8FF9' },
-    axis: { y: { title: 'Заказы' } },
-  };
+  const ordersByPriceData = (data?.orders_by_price || []).map((b) => ({
+    price: `${formatPrice(b.price)} ₽`,
+    orders: b.orders_count,
+  }));
 
   // --- Chart: Orders by Weekday (Column) ---
-  const weekdayConfig = {
-    data: (data?.orders_by_weekday || []).map((w) => ({
-      day: w.weekday_name,
-      orders: w.avg_orders,
-    })),
-    xField: 'day',
-    yField: 'orders',
-    style: { fill: '#5AD8A6' },
-    axis: { y: { title: 'Ср. заказов' } },
-  };
+  const weekdayData = (data?.orders_by_weekday || []).map((w) => ({
+    day: w.weekday_name,
+    orders: w.avg_orders,
+  }));
 
   const marginColor =
     data?.margin_pct == null
@@ -330,10 +288,17 @@ export default function ProductAnalyticsPage() {
           </Card>
         )}
 
-        {/* Main Chart: Orders + Price */}
-        <Card title="Заказы и цена" size="small" style={{ marginTop: 16 }}>
-          {dualAxesData.length > 0 ? (
-            <DualAxes data={dualAxesData} {...dualAxesConfig} height={320} />
+        {/* Main Chart: Orders */}
+        <Card title="Заказы по дням" size="small" style={{ marginTop: 16 }}>
+          {ordersChartData.length > 0 ? (
+            <Column
+              data={ordersChartData}
+              xField="date"
+              yField="value"
+              style={{ fill: '#5B8FF9', fillOpacity: 0.85 }}
+              axis={{ y: { title: 'Заказы' } }}
+              height={280}
+            />
           ) : (
             <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
               Нет данных за выбранный период
@@ -346,7 +311,16 @@ export default function ProductAnalyticsPage() {
           <Col xs={24} lg={14}>
             <Card title="Динамика цен" size="small">
               {priceLineData.length > 0 ? (
-                <Line {...priceLineConfig} height={260} />
+                <Line
+                  data={priceLineData}
+                  xField="date"
+                  yField="value"
+                  colorField="type"
+                  style={{ lineWidth: 2 }}
+                  axis={{ y: { title: '₽' } }}
+                  scale={{ color: { range: ['#E8684A', '#5AD8A6'] } }}
+                  height={260}
+                />
               ) : (
                 <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                   Нет данных о ценах
@@ -356,8 +330,15 @@ export default function ProductAnalyticsPage() {
           </Col>
           <Col xs={24} lg={10}>
             <Card title="Заказы по ценам" size="small">
-              {(data?.orders_by_price || []).length > 0 ? (
-                <Column {...ordersByPriceConfig} height={260} />
+              {ordersByPriceData.length > 0 ? (
+                <Column
+                  data={ordersByPriceData}
+                  xField="price"
+                  yField="orders"
+                  style={{ fill: '#5B8FF9' }}
+                  axis={{ y: { title: 'Заказы' } }}
+                  height={260}
+                />
               ) : (
                 <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                   Нет данных
@@ -369,7 +350,20 @@ export default function ProductAnalyticsPage() {
 
         {/* Third row: Weekday chart */}
         <Card title="Среднее количество заказов по дням недели" size="small" style={{ marginTop: 16 }}>
-          <Column {...weekdayConfig} height={220} />
+          {weekdayData.length > 0 ? (
+            <Column
+              data={weekdayData}
+              xField="day"
+              yField="orders"
+              style={{ fill: '#5AD8A6' }}
+              axis={{ y: { title: 'Ср. заказов' } }}
+              height={220}
+            />
+          ) : (
+            <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
+              Нет данных
+            </Typography.Text>
+          )}
         </Card>
       </Spin>
     </div>
