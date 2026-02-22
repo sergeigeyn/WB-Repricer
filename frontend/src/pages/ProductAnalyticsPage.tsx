@@ -19,9 +19,11 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   DashboardOutlined,
+  EyeOutlined,
   FieldTimeOutlined,
   InboxOutlined,
   ReloadOutlined,
+  ShoppingOutlined,
 } from '@ant-design/icons';
 import { Line, Column } from '@ant-design/charts';
 import apiClient from '@/api/client';
@@ -81,7 +83,37 @@ interface AnalyticsData {
   promo_prices: PromoInfo[];
   orders_by_price: PriceOrderBucket[];
   orders_by_weekday: WeekdayOrders[];
+  funnel_data: FunnelDataPoint[];
+  totals_funnel: FunnelTotals | null;
   days: number;
+}
+
+interface FunnelDataPoint {
+  date: string;
+  views: number;
+  cart: number;
+  orders: number;
+  buyouts: number;
+  cancels: number;
+  wishlist: number;
+  orders_sum_rub: number;
+  buyouts_sum_rub: number;
+  cart_conversion: number | null;
+  order_conversion: number | null;
+  buyout_pct: number | null;
+}
+
+interface FunnelTotals {
+  views: number;
+  cart: number;
+  orders: number;
+  buyouts: number;
+  cancels: number;
+  avg_cart_conversion: number | null;
+  avg_order_conversion: number | null;
+  avg_buyout_pct: number | null;
+  orders_sum_rub: number;
+  buyouts_sum_rub: number;
 }
 
 // --- Helpers ---
@@ -163,6 +195,24 @@ export default function ProductAnalyticsPage() {
         : data.margin_pct < 10
           ? '#fa8c16'
           : '#3f8600';
+
+  // --- Chart data: Funnel ---
+  const funnelLineData: { date: string; value: number; type: string }[] = [];
+  for (const d of data?.funnel_data || []) {
+    funnelLineData.push({ date: formatDate(d.date), value: d.views, type: 'Просмотры' });
+    funnelLineData.push({ date: formatDate(d.date), value: d.cart, type: 'Корзина' });
+    funnelLineData.push({ date: formatDate(d.date), value: d.orders, type: 'Заказы' });
+    funnelLineData.push({ date: formatDate(d.date), value: d.buyouts, type: 'Выкупы' });
+  }
+
+  const conversionLineData: { date: string; value: number; type: string }[] = [];
+  for (const d of data?.funnel_data || []) {
+    if (d.cart_conversion !== null) conversionLineData.push({ date: formatDate(d.date), value: d.cart_conversion, type: 'В корзину %' });
+    if (d.order_conversion !== null) conversionLineData.push({ date: formatDate(d.date), value: d.order_conversion, type: 'В заказ %' });
+    if (d.buyout_pct !== null) conversionLineData.push({ date: formatDate(d.date), value: d.buyout_pct, type: 'Выкуп %' });
+  }
+
+  const tf = data?.totals_funnel;
 
   return (
     <div>
@@ -274,6 +324,30 @@ export default function ProductAnalyticsPage() {
           </Col>
         </Row>
 
+        {/* Funnel metrics */}
+        {tf && tf.views > 0 && (
+          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+            <Col xs={24} sm={8} lg={4}>
+              <Card size="small"><Statistic title="Просмотры" value={tf.views} prefix={<EyeOutlined />} /></Card>
+            </Col>
+            <Col xs={24} sm={8} lg={4}>
+              <Card size="small"><Statistic title="В корзину" value={tf.cart} prefix={<ShoppingOutlined />} /></Card>
+            </Col>
+            <Col xs={24} sm={8} lg={4}>
+              <Card size="small"><Statistic title="Конв. в корзину" value={tf.avg_cart_conversion ?? 0} suffix="%" /></Card>
+            </Col>
+            <Col xs={24} sm={8} lg={4}>
+              <Card size="small"><Statistic title="Конв. в заказ" value={tf.avg_order_conversion ?? 0} suffix="%" /></Card>
+            </Col>
+            <Col xs={24} sm={8} lg={4}>
+              <Card size="small"><Statistic title="Выкуп" value={tf.avg_buyout_pct ?? 0} suffix="%" /></Card>
+            </Col>
+            <Col xs={24} sm={8} lg={4}>
+              <Card size="small"><Statistic title="Выкупы ₽" value={tf.buyouts_sum_rub} formatter={(val) => formatPrice(Number(val))} suffix="₽" /></Card>
+            </Col>
+          </Row>
+        )}
+
         {/* Promotions */}
         {data?.promo_prices && data.promo_prices.length > 0 && (
           <Card size="small" title="Активные акции" style={{ marginTop: 16 }}>
@@ -365,6 +439,45 @@ export default function ProductAnalyticsPage() {
             </Typography.Text>
           )}
         </Card>
+        {/* Funnel charts */}
+        {funnelLineData.length > 0 && (
+          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+            <Col xs={24} lg={14}>
+              <Card title="Воронка карточки" size="small">
+                <Line
+                  data={funnelLineData}
+                  xField="date"
+                  yField="value"
+                  colorField="type"
+                  style={{ lineWidth: 2 }}
+                  scale={{ color: { range: ['#8c8c8c', '#fa8c16', '#5B8FF9', '#5AD8A6'] } }}
+                  axis={{ y: { title: 'Количество' } }}
+                  height={260}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} lg={10}>
+              <Card title="Конверсии" size="small">
+                {conversionLineData.length > 0 ? (
+                  <Line
+                    data={conversionLineData}
+                    xField="date"
+                    yField="value"
+                    colorField="type"
+                    style={{ lineWidth: 2 }}
+                    scale={{ color: { range: ['#fa8c16', '#5B8FF9', '#5AD8A6'] } }}
+                    axis={{ y: { title: '%' } }}
+                    height={260}
+                  />
+                ) : (
+                  <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
+                    Нет данных о конверсиях
+                  </Typography.Text>
+                )}
+              </Card>
+            </Col>
+          </Row>
+        )}
       </Spin>
     </div>
   );

@@ -582,6 +582,129 @@ async def collect_promotions_only() -> dict:
     return results
 
 
+async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
+    """Sync card analytics from WB nm-report API into CardAnalyticsDaily.
+
+    Fetches views, cart adds, orders, buyouts, conversions per day per product.
+    Returns number of daily records upserted.
+    """
+    from app.models.sales import CardAnalyticsDaily
+
+    MSK = timezone(timedelta(hours=3))
+    now_msk = datetime.now(MSK)
+    # Fetch last 7 days to keep data fresh (including today)
+    date_from = now_msk - timedelta(days=7)
+    begin = date_from.strftime("%Y-%m-%d 00:00:00")
+    end = now_msk.strftime("%Y-%m-%d 23:59:59")
+
+    # Get nm_ids for this account
+    result = await db.execute(
+        select(Product.nm_id, Product.id).where(Product.account_id == account_id)
+    )
+    nm_to_pid = {row.nm_id: row.id for row in result.all()}
+
+    if not nm_to_pid:
+        logger.info("No products for account %d", account_id)
+        return 0
+
+    nm_ids = list(nm_to_pid.keys())
+
+    try:
+        report_data = await client.get_nm_report_detail_history(nm_ids, begin, end)
+    except Exception as e:
+        logger.warning("Failed to fetch nm-report for account %d: %s", account_id, e)
+        return 0
+
+    upserted = 0
+    for item in report_data:
+        nm_id = item.get("nmID")
+        product_id = nm_to_pid.get(nm_id)
+        if not product_id:
+            continue
+
+        history = item.get("history", [])
+        for day in history:
+            dt_str = day.get("dt", "")
+            if not dt_str:
+                continue
+            try:
+                day_date = datetime.fromisoformat(dt_str.replace("Z", "+00:00")).date()
+            except (ValueError, AttributeError):
+                continue
+
+            result = await db.execute(
+                select(CardAnalyticsDaily).where(
+                    CardAnalyticsDaily.product_id == product_id,
+                    CardAnalyticsDaily.date == day_date,
+                )
+            )
+            existing = result.scalar_one_or_none()
+
+            values = {
+                "open_card_count": day.get("openCardCount", 0) or 0,
+                "add_to_cart_count": day.get("addToCartCount", 0) or 0,
+                "orders_count": day.get("ordersCount", 0) or 0,
+                "orders_sum_rub": day.get("ordersSumRub", 0) or 0,
+                "buyouts_count": day.get("buyoutsCount", 0) or 0,
+                "buyouts_sum_rub": day.get("buyoutsSumRub", 0) or 0,
+                "cancel_count": day.get("cancelCount", 0) or 0,
+                "cancel_sum_rub": day.get("cancelSumRub", 0) or 0,
+                "add_to_cart_conversion": day.get("addToCartConversion"),
+                "cart_to_order_conversion": day.get("cartToOrderConversion"),
+                "buyout_percent": day.get("buyoutPercent"),
+                "add_to_wishlist": day.get("addToWishlistCount", 0) or 0,
+            }
+
+            if existing:
+                for k, v in values.items():
+                    setattr(existing, k, v)
+            else:
+                db.add(CardAnalyticsDaily(
+                    product_id=product_id,
+                    date=day_date,
+                    **values,
+                ))
+            upserted += 1
+
+    await db.flush()
+    logger.info(
+        "Upserted %d card analytics records for account %d",
+        upserted, account_id,
+    )
+    return upserted
+
+
+async def collect_card_analytics_only() -> dict:
+    """Sync card analytics from WB nm-report API for all accounts.
+
+    Designed to run every 2 hours to keep funnel data fresh.
+    """
+    results = {"accounts": 0, "records_synced": 0, "errors": []}
+
+    async with async_session() as db:
+        accounts = await _get_active_accounts(db)
+        results["accounts"] = len(accounts)
+
+        for account in accounts:
+            try:
+                api_key = decrypt_api_key(account.api_key_encrypted)
+                client = WBApiClient(api_key)
+                count = await sync_card_analytics(db, client, account.id)
+                results["records_synced"] += count
+            except Exception as e:
+                error_msg = f"Account {account.id}: {e}"
+                logger.warning("Card analytics sync failed: %s", error_msg)
+                results["errors"].append(error_msg)
+
+        await db.commit()
+
+    logger.info(
+        "Card analytics sync complete: %d accounts, %d records",
+        results["accounts"], results["records_synced"],
+    )
+    return results
+
+
 async def collect_all() -> dict:
     """Main entry point: collect products, prices and stocks for all active WB accounts.
 

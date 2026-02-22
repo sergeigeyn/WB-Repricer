@@ -54,6 +54,11 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.data_collector.collect_promotions",
         "schedule": crontab(hour=5, minute=0),
     },
+    # Collect card analytics (views, cart, conversions) every 2 hours
+    "collect-card-analytics": {
+        "task": "app.tasks.data_collector.collect_card_analytics",
+        "schedule": crontab(minute=30, hour="*/2"),
+    },
 }
 
 
@@ -103,6 +108,14 @@ def collect_promotions():
     from app.services.data_collector import collect_promotions_only
 
     return _run_async(collect_promotions_only)
+
+
+@celery_app.task(name="app.tasks.data_collector.collect_card_analytics")
+def collect_card_analytics():
+    """Sync card analytics (views, cart, conversions) from WB nm-report API."""
+    from app.services.data_collector import collect_card_analytics_only
+
+    return _run_async(collect_card_analytics_only)
 
 
 @celery_app.task(name="app.tasks.price_updater.run_all_strategies")

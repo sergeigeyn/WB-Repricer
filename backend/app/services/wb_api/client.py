@@ -320,6 +320,58 @@ class WBApiClient(BaseWBClient):
         logger.info("Fetched box tariffs for %d warehouses", len(tariffs))
         return data
 
+    # --- Analytics API (nm-report) ---
+
+    async def get_nm_report_detail_history(
+        self, nm_ids: list[int], begin: str, end: str
+    ) -> list[dict[str, Any]]:
+        """Fetch daily card analytics via nm-report/detail/history.
+
+        WB Analytics API returns views, cart adds, orders, buyouts, conversions per day per nmID.
+        Max 20 nmIDs per request. Data updates hourly.
+
+        Args:
+            nm_ids: list of nmID (max 20 per request)
+            begin: start datetime "YYYY-MM-DD HH:MM:SS"
+            end: end datetime "YYYY-MM-DD HH:MM:SS"
+
+        Returns: list of dicts with nmID, dt, openCardCount, addToCartCount, etc.
+        """
+        all_items: list[dict[str, Any]] = []
+
+        # Batch by 20 nmIDs (WB limit)
+        for i in range(0, len(nm_ids), 20):
+            batch = nm_ids[i : i + 20]
+            try:
+                data = await self._request(
+                    "POST",
+                    f"{WB_ANALYTICS}/api/v2/nm-report/detail/history",
+                    json={
+                        "nmIDs": batch,
+                        "period": {"begin": begin, "end": end},
+                        "timezone": "Europe/Moscow",
+                        "aggregationLevel": "day",
+                    },
+                )
+                # Response: {"data": [{"nmID": ..., "history": [{"dt": ..., "openCardCount": ...}]}]}
+                items = data.get("data", []) if isinstance(data, dict) else []
+                all_items.extend(items)
+            except Exception as e:
+                logger.warning(
+                    "nm-report batch %d-%d failed: %s", i, i + len(batch), e
+                )
+
+            # Small delay between batches to avoid rate limiting
+            if i + 20 < len(nm_ids):
+                await asyncio.sleep(1)
+
+        logger.info(
+            "Fetched nm-report history for %d products (%d batches)",
+            len(nm_ids),
+            (len(nm_ids) + 19) // 20,
+        )
+        return all_items
+
     # --- Calendar API (Promotions) ---
 
     async def get_promotions(self) -> list[dict[str, Any]]:

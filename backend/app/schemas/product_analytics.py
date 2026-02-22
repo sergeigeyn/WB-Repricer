@@ -51,6 +51,38 @@ class WeekdayOrders(BaseModel):
     avg_orders: float = 0
 
 
+class FunnelDataPoint(BaseModel):
+    """Daily funnel data from nm-report (views → cart → orders → buyouts)."""
+
+    date: date
+    views: int = 0
+    cart: int = 0
+    orders: int = 0
+    buyouts: int = 0
+    cancels: int = 0
+    wishlist: int = 0
+    orders_sum_rub: float = 0
+    buyouts_sum_rub: float = 0
+    cart_conversion: float | None = None
+    order_conversion: float | None = None
+    buyout_pct: float | None = None
+
+
+class FunnelTotals(BaseModel):
+    """Aggregated funnel totals for the period."""
+
+    views: int = 0
+    cart: int = 0
+    orders: int = 0
+    buyouts: int = 0
+    cancels: int = 0
+    avg_cart_conversion: float | None = None
+    avg_order_conversion: float | None = None
+    avg_buyout_pct: float | None = None
+    orders_sum_rub: float = 0
+    buyouts_sum_rub: float = 0
+
+
 class ProductAnalyticsResponse(BaseModel):
     """Full product analytics response."""
 
@@ -74,4 +106,9 @@ class ProductAnalyticsResponse(BaseModel):
     promo_prices: list[PromoInfo] = []
     orders_by_price: list[PriceOrderBucket] = []
     orders_by_weekday: list[WeekdayOrders] = []
+
+    # Funnel data (from nm-report)
+    funnel_data: list[FunnelDataPoint] = []
+    totals_funnel: FunnelTotals | None = None
+
     days: int = 30

@@ -13,10 +13,12 @@ from app.core.database import get_db
 from app.models.price import PriceSnapshot
 from app.models.product import Product, WBAccount
 from app.models.promotion import Promotion, PromotionProduct
-from app.models.sales import SalesDaily
+from app.models.sales import SalesDaily, CardAnalyticsDaily
 from app.models.user import User
 from app.schemas.product_analytics import (
     DailyDataPoint,
+    FunnelDataPoint,
+    FunnelTotals,
     PriceOrderBucket,
     PricePoint,
     PromoInfo,
@@ -271,6 +273,50 @@ async def get_product_analytics(
     if velocity_7d > 0 and (product.total_stock or 0) > 0:
         turnover = round((product.total_stock or 0) / velocity_7d, 1)
 
+    # --- Funnel data (from card_analytics_daily) ---
+    funnel_result = await db.execute(
+        select(CardAnalyticsDaily)
+        .where(CardAnalyticsDaily.product_id == product_id, CardAnalyticsDaily.date >= start_date)
+        .order_by(CardAnalyticsDaily.date)
+    )
+    funnel_rows = list(funnel_result.scalars().all())
+
+    funnel_data: list[FunnelDataPoint] = []
+    t_views = t_cart = t_orders = t_buyouts = t_cancels = 0
+    t_orders_rub = t_buyouts_rub = 0.0
+
+    for fr in funnel_rows:
+        funnel_data.append(FunnelDataPoint(
+            date=fr.date,
+            views=fr.open_card_count,
+            cart=fr.add_to_cart_count,
+            orders=fr.orders_count,
+            buyouts=fr.buyouts_count,
+            cancels=fr.cancel_count,
+            wishlist=fr.add_to_wishlist,
+            orders_sum_rub=float(fr.orders_sum_rub) if fr.orders_sum_rub else 0,
+            buyouts_sum_rub=float(fr.buyouts_sum_rub) if fr.buyouts_sum_rub else 0,
+            cart_conversion=float(fr.add_to_cart_conversion) if fr.add_to_cart_conversion is not None else None,
+            order_conversion=float(fr.cart_to_order_conversion) if fr.cart_to_order_conversion is not None else None,
+            buyout_pct=float(fr.buyout_percent) if fr.buyout_percent is not None else None,
+        ))
+        t_views += fr.open_card_count
+        t_cart += fr.add_to_cart_count
+        t_orders += fr.orders_count
+        t_buyouts += fr.buyouts_count
+        t_cancels += fr.cancel_count
+        t_orders_rub += float(fr.orders_sum_rub) if fr.orders_sum_rub else 0
+        t_buyouts_rub += float(fr.buyouts_sum_rub) if fr.buyouts_sum_rub else 0
+
+    totals_funnel = FunnelTotals(
+        views=t_views, cart=t_cart, orders=t_orders, buyouts=t_buyouts, cancels=t_cancels,
+        avg_cart_conversion=round(t_cart / t_views * 100, 2) if t_views > 0 else None,
+        avg_order_conversion=round(t_orders / t_cart * 100, 2) if t_cart > 0 else None,
+        avg_buyout_pct=round(t_buyouts / t_orders * 100, 1) if t_orders > 0 else None,
+        orders_sum_rub=round(t_orders_rub, 2),
+        buyouts_sum_rub=round(t_buyouts_rub, 2),
+    ) if funnel_rows else None
+
     return ProductAnalyticsResponse(
         product_id=product.id,
         nm_id=product.nm_id,
@@ -289,4 +335,6 @@ async def get_product_analytics(
         orders_by_price=orders_by_price,
         orders_by_weekday=orders_by_weekday,
         days=days,
+        funnel_data=funnel_data,
+        totals_funnel=totals_funnel,
     )
