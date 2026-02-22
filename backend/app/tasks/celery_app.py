@@ -1,5 +1,7 @@
 """Celery application configuration."""
 
+import asyncio
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -55,6 +57,26 @@ celery_app.conf.beat_schedule = {
 }
 
 
+def _run_async(coro_func, *args, **kwargs):
+    """Run async function in a fresh event loop with clean DB connection pool.
+
+    Each Celery task gets a new event loop, but SQLAlchemy's async engine
+    pools connections bound to a specific loop. Disposing the pool before
+    each task ensures fresh connections on the new loop.
+    """
+    async def _wrapper():
+        from app.core.database import engine
+
+        await engine.dispose()
+        return await coro_func(*args, **kwargs)
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_wrapper())
+    finally:
+        loop.close()
+
+
 @celery_app.task(
     name="app.tasks.data_collector.collect_all_data",
     soft_time_limit=600,
@@ -62,60 +84,30 @@ celery_app.conf.beat_schedule = {
 )
 def collect_all_data():
     """Collect products, prices, stocks, orders, commissions, storage, promotions from WB API."""
-    import asyncio
-
     from app.services.data_collector import collect_all
 
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(collect_all())
-        return result
-    finally:
-        loop.close()
+    return _run_async(collect_all)
 
 
 @celery_app.task(name="app.tasks.data_collector.collect_orders")
 def collect_orders():
     """Sync orders from WB Statistics API (lightweight, runs every 15 min)."""
-    import asyncio
-
     from app.services.data_collector import collect_orders_only
 
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(collect_orders_only())
-        return result
-    finally:
-        loop.close()
+    return _run_async(collect_orders_only)
 
 
 @celery_app.task(name="app.tasks.data_collector.collect_promotions")
 def collect_promotions():
     """Sync promotions and promotion products from WB Calendar API."""
-    import asyncio
-
     from app.services.data_collector import collect_promotions_only
 
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(collect_promotions_only())
-        return result
-    finally:
-        loop.close()
+    return _run_async(collect_promotions_only)
 
 
 @celery_app.task(name="app.tasks.price_updater.run_all_strategies")
 def run_all_strategies():
     """Execute all active pricing strategies."""
-    import asyncio
-
     from app.services.strategies.runner import run_all_active_strategies
 
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(
-            run_all_active_strategies(triggered_by="schedule")
-        )
-        return result
-    finally:
-        loop.close()
+    return _run_async(run_all_active_strategies, triggered_by="schedule")
