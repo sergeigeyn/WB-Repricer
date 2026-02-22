@@ -6,6 +6,7 @@ from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
 from app.api.data import router as data_router
 from app.api.health import router as health_router
+from app.api.product_analytics import router as product_analytics_router
 from app.api.products import router as products_router
 from app.api.promotions import router as promotions_router
 from app.api.settings import router as settings_router
@@ -16,6 +17,7 @@ api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(products_router)
+api_router.include_router(product_analytics_router)
 api_router.include_router(promotions_router)
 api_router.include_router(strategies_router)
 api_router.include_router(settings_router)

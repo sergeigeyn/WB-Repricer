@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Table,
   Typography,
@@ -23,6 +23,7 @@ import {
   FileExcelOutlined,
   PlusOutlined,
   DeleteOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import apiClient from '@/api/client';
@@ -69,6 +70,7 @@ interface ImportResult {
 }
 
 export default function ProductsPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
@@ -517,6 +519,20 @@ export default function ProductsPage() {
           sorter: true,
         },
       ],
+    },
+    {
+      title: '',
+      key: 'actions',
+      width: 50,
+      fixed: 'right' as const,
+      render: (_: unknown, record: Product) => (
+        <Button
+          type="text"
+          icon={<BarChartOutlined />}
+          onClick={() => navigate(`/products/${record.id}/analytics`)}
+          title="Аналитика"
+        />
+      ),
     },
   ];
 
