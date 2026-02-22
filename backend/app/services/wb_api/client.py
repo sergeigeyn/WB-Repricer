@@ -353,44 +353,37 @@ class WBApiClient(BaseWBClient):
             date_chunks.append((chunk_start.isoformat(), chunk_end.isoformat()))
             chunk_start = chunk_end + timedelta(days=1)
 
+        # Batch nmIds by 20 (WB limit per request)
+        nm_batches = [nm_ids[i : i + 20] for i in range(0, len(nm_ids), 20)]
+        request_count = 0
+
         for chunk_idx, (chunk_s, chunk_e) in enumerate(date_chunks):
-            # Process in batches — no strict batch size limit in v3, but keep reasonable
-            offset = 0
-            while True:
+            for batch_idx, batch in enumerate(nm_batches):
+                # Rate limit: 3 req / 20 sec — wait 7 sec between requests
+                if request_count > 0:
+                    await asyncio.sleep(7)
+
                 try:
                     data = await self._request(
                         "POST",
                         f"{WB_ANALYTICS}/api/analytics/v3/sales-funnel/products/history",
                         json={
                             "selectedPeriod": {"start": chunk_s, "end": chunk_e},
-                            "nmIds": nm_ids,
-                            "brandNames": [],
-                            "subjectIds": [],
-                            "tagIds": [],
+                            "nmIds": batch,
                             "limit": 100,
-                            "offset": offset,
+                            "offset": 0,
                         },
                     )
-                    items = data.get("data", []) if isinstance(data, dict) else []
+                    # v3 returns array directly, not {"data": [...]}
+                    items = data if isinstance(data, list) else data.get("data", []) if isinstance(data, dict) else []
                     all_items.extend(items)
-
-                    # If fewer items than limit, no more pages
-                    if len(items) < 100:
-                        break
-                    offset += 100
+                    request_count += 1
                 except Exception as e:
                     logger.warning(
-                        "sales-funnel history chunk %s-%s offset %d failed: %s",
-                        chunk_s, chunk_e, offset, e,
+                        "sales-funnel batch %d chunk %s-%s failed: %s",
+                        batch_idx, chunk_s, chunk_e, e,
                     )
-                    break
-
-                # Rate limit: 3 req / 20 sec — wait 7 sec between requests
-                await asyncio.sleep(7)
-
-            # Delay between date chunks
-            if chunk_idx + 1 < len(date_chunks):
-                await asyncio.sleep(7)
+                    request_count += 1
 
         logger.info(
             "Fetched sales-funnel history for %d products (%d date chunks)",
