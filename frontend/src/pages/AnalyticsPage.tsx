@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Button,
   Card,
@@ -24,19 +24,8 @@ import {
   ShopOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { Line, Column as ColumnChart } from '@ant-design/charts';
 import apiClient from '@/api/client';
-
-// Lazy load charts to prevent silent crashes in production
-const Line = lazy(() => import('@ant-design/charts').then((m) => ({ default: m.Line as any })));
-const ColumnChart = lazy(() => import('@ant-design/charts').then((m) => ({ default: m.Column as any })));
-
-function ChartWrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <Suspense fallback={<Spin style={{ display: 'block', textAlign: 'center', padding: 48 }} />}>
-      {children}
-    </Suspense>
-  );
-}
 
 // --- Interfaces ---
 
@@ -392,7 +381,7 @@ export default function AnalyticsPage() {
         {/* Orders trend chart */}
         <Card title="Динамика заказов" size="small" style={{ marginTop: 16 }}>
           {trendLineData.length > 0 ? (
-            <ChartWrapper>
+            <>
               <Line
                 data={trendLineData}
                 xField="date"
@@ -402,7 +391,7 @@ export default function AnalyticsPage() {
                 axis={{ y: { title: 'Заказы' } }}
                 height={280}
               />
-            </ChartWrapper>
+            </>
           ) : (
             <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
               Нет данных за выбранный период
@@ -415,7 +404,7 @@ export default function AnalyticsPage() {
           <Col xs={24} lg={12}>
             <Card title="Выручка по дням" size="small">
               {revenueLineData.length > 0 ? (
-                <ChartWrapper>
+                <>
                   <Line
                     data={revenueLineData}
                     xField="date"
@@ -426,7 +415,7 @@ export default function AnalyticsPage() {
                     axis={{ y: { title: '₽' } }}
                     height={220}
                   />
-                </ChartWrapper>
+                </>
               ) : (
                 <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                   Нет данных
@@ -437,7 +426,7 @@ export default function AnalyticsPage() {
           <Col xs={24} lg={12}>
             <Card title="Прибыль по дням" size="small">
               {profitLineData.length > 0 ? (
-                <ChartWrapper>
+                <>
                   <Line
                     data={profitLineData}
                     xField="date"
@@ -448,7 +437,7 @@ export default function AnalyticsPage() {
                     axis={{ y: { title: '₽' } }}
                     height={220}
                   />
-                </ChartWrapper>
+                </>
               ) : (
                 <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                   Нет данных
@@ -463,7 +452,7 @@ export default function AnalyticsPage() {
           <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
             <Col xs={24} lg={14}>
               <Card title="Воронка по дням" size="small">
-                <ChartWrapper>
+                <>
                   <Line
                     data={funnelLineData}
                     xField="date"
@@ -474,13 +463,13 @@ export default function AnalyticsPage() {
                     axis={{ y: { title: 'Количество' } }}
                     height={260}
                   />
-                </ChartWrapper>
+                </>
               </Card>
             </Col>
             <Col xs={24} lg={10}>
               <Card title="Конверсии по дням" size="small">
                 {convLineData.length > 0 ? (
-                  <ChartWrapper>
+                  <>
                     <Line
                       data={convLineData}
                       xField="date"
@@ -491,7 +480,7 @@ export default function AnalyticsPage() {
                       axis={{ y: { title: '%' } }}
                       height={260}
                     />
-                  </ChartWrapper>
+                  </>
                 ) : (
                   <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                     Нет данных
@@ -525,7 +514,7 @@ export default function AnalyticsPage() {
           <Col xs={24} lg={10}>
             <Card title="Среднее заказов по дням недели" size="small">
               {weekdayData.length > 0 ? (
-                <ChartWrapper>
+                <>
                   <ColumnChart
                     data={weekdayData}
                     xField="day"
@@ -534,7 +523,7 @@ export default function AnalyticsPage() {
                     axis={{ y: { title: 'Ср. заказов' } }}
                     height={260}
                   />
-                </ChartWrapper>
+                </>
               ) : (
                 <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                   Нет данных
