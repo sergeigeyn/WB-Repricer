@@ -55,10 +55,23 @@ celery_app.conf.beat_schedule = {
 }
 
 
-@celery_app.task(name="app.tasks.data_collector.collect_all_data")
+@celery_app.task(
+    name="app.tasks.data_collector.collect_all_data",
+    soft_time_limit=600,
+    time_limit=660,
+)
 def collect_all_data():
-    """Placeholder: collect prices, stocks, sales from WB API."""
-    return {"status": "ok", "task": "collect_all_data"}
+    """Collect products, prices, stocks, orders, commissions, storage, promotions from WB API."""
+    import asyncio
+
+    from app.services.data_collector import collect_all
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(collect_all())
+        return result
+    finally:
+        loop.close()
 
 
 @celery_app.task(name="app.tasks.data_collector.collect_orders")
@@ -78,8 +91,17 @@ def collect_orders():
 
 @celery_app.task(name="app.tasks.data_collector.collect_promotions")
 def collect_promotions():
-    """Placeholder: collect promotions from WB API."""
-    return {"status": "ok", "task": "collect_promotions"}
+    """Sync promotions and promotion products from WB Calendar API."""
+    import asyncio
+
+    from app.services.data_collector import collect_promotions_only
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(collect_promotions_only())
+        return result
+    finally:
+        loop.close()
 
 
 @celery_app.task(name="app.tasks.price_updater.run_all_strategies")

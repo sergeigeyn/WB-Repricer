@@ -536,6 +536,52 @@ async def collect_orders_only() -> dict:
     return results
 
 
+async def collect_promotions_only() -> dict:
+    """Sync promotions and promotion products from WB Calendar API.
+
+    Designed to run once a day to keep promotion data fresh.
+    """
+    results = {"accounts": 0, "promotions_synced": 0, "promo_products_synced": 0, "errors": []}
+
+    async with async_session() as db:
+        accounts = await _get_active_accounts(db)
+        results["accounts"] = len(accounts)
+
+        for account in accounts:
+            try:
+                api_key = decrypt_api_key(account.api_key_encrypted)
+                client = WBApiClient(api_key)
+
+                promos_count = await sync_promotions(db, client, account.id)
+                results["promotions_synced"] += promos_count
+
+                # Sync products for active/upcoming promotions
+                promo_result = await db.execute(
+                    select(Promotion).where(
+                        Promotion.account_id == account.id,
+                        Promotion.status.in_(["active", "upcoming"]),
+                    )
+                )
+                for promo in promo_result.scalars().all():
+                    if promo.wb_promo_id:
+                        count = await sync_promotion_products(
+                            db, client, account.id, promo.id, promo.wb_promo_id
+                        )
+                        results["promo_products_synced"] += count
+            except Exception as e:
+                error_msg = f"Account {account.id}: {e}"
+                logger.warning("Promotions sync failed: %s", error_msg)
+                results["errors"].append(error_msg)
+
+        await db.commit()
+
+    logger.info(
+        "Promotions sync complete: %d accounts, %d promotions, %d products",
+        results["accounts"], results["promotions_synced"], results["promo_products_synced"],
+    )
+    return results
+
+
 async def collect_all() -> dict:
     """Main entry point: collect products, prices and stocks for all active WB accounts.
 

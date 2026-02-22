@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card,
   Form,
@@ -14,6 +14,8 @@ import {
   Alert,
   Spin,
   Divider,
+  Progress,
+  Descriptions,
 } from 'antd';
 import {
   PlusOutlined,
@@ -21,6 +23,8 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ReloadOutlined,
+  CloudSyncOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import apiClient from '@/api/client';
 
@@ -41,6 +45,12 @@ interface ValidationResult {
   error: string | null;
 }
 
+interface TaskStatus {
+  task_id: string;
+  status: string;
+  result: Record<string, unknown> | null;
+}
+
 const PERMISSION_LABELS: Record<string, { label: string; color: string }> = {
   content: { label: 'Контент', color: 'blue' },
   prices: { label: 'Цены и скидки', color: 'green' },
@@ -54,6 +64,14 @@ const PERMISSION_LABELS: Record<string, { label: string; color: string }> = {
   returns: { label: 'Возвраты', color: 'volcano' },
 };
 
+const TASK_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  PENDING: { label: 'В очереди', color: 'default' },
+  STARTED: { label: 'Выполняется', color: 'processing' },
+  SUCCESS: { label: 'Завершено', color: 'success' },
+  FAILURE: { label: 'Ошибка', color: 'error' },
+  RETRY: { label: 'Повторная попытка', color: 'warning' },
+};
+
 export default function SettingsPage() {
   const [accounts, setAccounts] = useState<WBAccount[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,6 +80,14 @@ export default function SettingsPage() {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [checkingId, setCheckingId] = useState<number | null>(null);
   const [form] = Form.useForm();
+
+  // Data collection state
+  const [collectingData, setCollectingData] = useState(false);
+  const [collectingPromos, setCollectingPromos] = useState(false);
+  const [dataTask, setDataTask] = useState<TaskStatus | null>(null);
+  const [promoTask, setPromoTask] = useState<TaskStatus | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const promoPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchAccounts = async () => {
     setLoading(true);
@@ -77,6 +103,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchAccounts();
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (promoPollTimerRef.current) clearInterval(promoPollTimerRef.current);
+    };
   }, []);
 
   const handleValidate = async () => {
@@ -156,6 +186,105 @@ export default function SettingsPage() {
     } finally {
       setCheckingId(null);
     }
+  };
+
+  // --- Data collection ---
+
+  const pollTaskStatus = useCallback(async (
+    taskId: string,
+    setTask: (t: TaskStatus) => void,
+    setCollecting: (v: boolean) => void,
+    timerRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>,
+    label: string,
+  ) => {
+    try {
+      const { data } = await apiClient.get(`/data/task/${taskId}`);
+      setTask(data);
+      if (data.status === 'SUCCESS') {
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = null;
+        setCollecting(false);
+        message.success(`${label} завершён`);
+      } else if (data.status === 'FAILURE') {
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = null;
+        setCollecting(false);
+        message.error(`${label}: ошибка`);
+      }
+    } catch {
+      // Ignore polling errors
+    }
+  }, []);
+
+  const handleCollectData = async () => {
+    setCollectingData(true);
+    setDataTask(null);
+    try {
+      const { data } = await apiClient.post('/data/collect');
+      setDataTask({ task_id: data.task_id, status: 'STARTED', result: null });
+
+      pollTimerRef.current = setInterval(() => {
+        pollTaskStatus(data.task_id, setDataTask, setCollectingData, pollTimerRef, 'Сбор данных');
+      }, 5000);
+    } catch {
+      message.error('Не удалось запустить сбор данных');
+      setCollectingData(false);
+    }
+  };
+
+  const handleCollectPromos = async () => {
+    setCollectingPromos(true);
+    setPromoTask(null);
+    try {
+      const { data } = await apiClient.post('/data/collect-promotions');
+      setPromoTask({ task_id: data.task_id, status: 'STARTED', result: null });
+
+      promoPollTimerRef.current = setInterval(() => {
+        pollTaskStatus(data.task_id, setPromoTask, setCollectingPromos, promoPollTimerRef, 'Синхронизация акций');
+      }, 5000);
+    } catch {
+      message.error('Не удалось запустить синхронизацию акций');
+      setCollectingPromos(false);
+    }
+  };
+
+  const renderTaskResult = (task: TaskStatus | null) => {
+    if (!task) return null;
+
+    const statusInfo = TASK_STATUS_LABELS[task.status] || { label: task.status, color: 'default' };
+
+    return (
+      <div style={{ marginTop: 12 }}>
+        <Space>
+          <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+          {(task.status === 'STARTED' || task.status === 'PENDING') && <SyncOutlined spin />}
+        </Space>
+        {task.status === 'SUCCESS' && task.result && (
+          <Descriptions size="small" column={2} style={{ marginTop: 8 }} bordered>
+            {Object.entries(task.result).map(([key, value]) => {
+              if (key === 'errors' && Array.isArray(value) && value.length === 0) return null;
+              if (key === 'errors' && Array.isArray(value) && value.length > 0) {
+                return (
+                  <Descriptions.Item key={key} label="Ошибки" span={2}>
+                    {value.map((err, i) => (
+                      <Tag color="red" key={i} style={{ marginBottom: 2 }}>{String(err)}</Tag>
+                    ))}
+                  </Descriptions.Item>
+                );
+              }
+              return (
+                <Descriptions.Item key={key} label={key}>
+                  {String(value)}
+                </Descriptions.Item>
+              );
+            })}
+          </Descriptions>
+        )}
+        {task.status === 'STARTED' && (
+          <Progress percent={99} status="active" showInfo={false} style={{ marginTop: 8 }} />
+        )}
+      </div>
+    );
   };
 
   const columns = [
@@ -265,6 +394,35 @@ export default function SettingsPage() {
   return (
     <div>
       <Typography.Title level={3}>Настройки</Typography.Title>
+
+      {/* Data Collection Section */}
+      <Card title="Сбор данных" style={{ marginBottom: 24 }}>
+        <Typography.Paragraph type="secondary">
+          Данные автоматически собираются 2 раза в день (09:00 и 18:00 МСК). Заказы обновляются каждые 15 минут.
+          Вы можете запустить сбор вручную.
+        </Typography.Paragraph>
+        <Space>
+          <Button
+            type="primary"
+            icon={<CloudSyncOutlined />}
+            onClick={handleCollectData}
+            loading={collectingData}
+            disabled={collectingData}
+          >
+            Собрать все данные
+          </Button>
+          <Button
+            icon={<SyncOutlined />}
+            onClick={handleCollectPromos}
+            loading={collectingPromos}
+            disabled={collectingPromos}
+          >
+            Синхронизировать акции
+          </Button>
+        </Space>
+        {renderTaskResult(dataTask)}
+        {renderTaskResult(promoTask)}
+      </Card>
 
       <Card title="WB API Аккаунты" style={{ marginBottom: 24 }}>
         <Spin spinning={loading}>
