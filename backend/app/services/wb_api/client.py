@@ -320,55 +320,81 @@ class WBApiClient(BaseWBClient):
         logger.info("Fetched box tariffs for %d warehouses", len(tariffs))
         return data
 
-    # --- Analytics API (nm-report) ---
+    # --- Analytics API (Sales Funnel v3, replaces deprecated nm-report v2) ---
 
-    async def get_nm_report_detail_history(
-        self, nm_ids: list[int], begin: str, end: str
+    async def get_sales_funnel_history(
+        self, nm_ids: list[int], start_date: str, end_date: str
     ) -> list[dict[str, Any]]:
-        """Fetch daily card analytics via nm-report/detail/history.
+        """Fetch daily card analytics via Sales Funnel v3 API.
 
         WB Analytics API returns views, cart adds, orders, buyouts, conversions per day per nmID.
-        Max 20 nmIDs per request. Data updates hourly.
+        Rate limit: 3 requests per 20 seconds.
+        Max period: 7 days per request.
 
         Args:
-            nm_ids: list of nmID (max 20 per request)
-            begin: start datetime "YYYY-MM-DD HH:MM:SS"
-            end: end datetime "YYYY-MM-DD HH:MM:SS"
+            nm_ids: list of nmID
+            start_date: start date "YYYY-MM-DD"
+            end_date: end date "YYYY-MM-DD"
 
-        Returns: list of dicts with nmID, dt, openCardCount, addToCartCount, etc.
+        Returns: list of dicts with nmID and daily history data.
         """
         all_items: list[dict[str, Any]] = []
 
-        # Batch by 20 nmIDs (WB limit)
-        for i in range(0, len(nm_ids), 20):
-            batch = nm_ids[i : i + 20]
-            try:
-                data = await self._request(
-                    "POST",
-                    f"{WB_ANALYTICS}/api/v2/nm-report/detail/history",
-                    json={
-                        "nmIDs": batch,
-                        "period": {"begin": begin, "end": end},
-                        "timezone": "Europe/Moscow",
-                        "aggregationLevel": "day",
-                    },
-                )
-                # Response: {"data": [{"nmID": ..., "history": [{"dt": ..., "openCardCount": ...}]}]}
-                items = data.get("data", []) if isinstance(data, dict) else []
-                all_items.extend(items)
-            except Exception as e:
-                logger.warning(
-                    "nm-report batch %d-%d failed: %s", i, i + len(batch), e
-                )
+        # Split into 7-day chunks (WB max period per request)
+        from datetime import datetime as dt_cls
+        start = dt_cls.strptime(start_date, "%Y-%m-%d").date()
+        end = dt_cls.strptime(end_date, "%Y-%m-%d").date()
 
-            # Small delay between batches to avoid rate limiting
-            if i + 20 < len(nm_ids):
-                await asyncio.sleep(1)
+        date_chunks: list[tuple[str, str]] = []
+        chunk_start = start
+        while chunk_start <= end:
+            chunk_end = min(chunk_start + timedelta(days=6), end)
+            date_chunks.append((chunk_start.isoformat(), chunk_end.isoformat()))
+            chunk_start = chunk_end + timedelta(days=1)
+
+        for chunk_idx, (chunk_s, chunk_e) in enumerate(date_chunks):
+            # Process in batches — no strict batch size limit in v3, but keep reasonable
+            offset = 0
+            while True:
+                try:
+                    data = await self._request(
+                        "POST",
+                        f"{WB_ANALYTICS}/api/analytics/v3/sales-funnel/products/history",
+                        json={
+                            "selectedPeriod": {"start": chunk_s, "end": chunk_e},
+                            "nmIds": nm_ids,
+                            "brandNames": [],
+                            "subjectIds": [],
+                            "tagIds": [],
+                            "limit": 100,
+                            "offset": offset,
+                        },
+                    )
+                    items = data.get("data", []) if isinstance(data, dict) else []
+                    all_items.extend(items)
+
+                    # If fewer items than limit, no more pages
+                    if len(items) < 100:
+                        break
+                    offset += 100
+                except Exception as e:
+                    logger.warning(
+                        "sales-funnel history chunk %s-%s offset %d failed: %s",
+                        chunk_s, chunk_e, offset, e,
+                    )
+                    break
+
+                # Rate limit: 3 req / 20 sec — wait 7 sec between requests
+                await asyncio.sleep(7)
+
+            # Delay between date chunks
+            if chunk_idx + 1 < len(date_chunks):
+                await asyncio.sleep(7)
 
         logger.info(
-            "Fetched nm-report history for %d products (%d batches)",
+            "Fetched sales-funnel history for %d products (%d date chunks)",
             len(nm_ids),
-            (len(nm_ids) + 19) // 20,
+            len(date_chunks),
         )
         return all_items
 

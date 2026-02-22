@@ -583,7 +583,7 @@ async def collect_promotions_only() -> dict:
 
 
 async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id: int) -> int:
-    """Sync card analytics from WB nm-report API into CardAnalyticsDaily.
+    """Sync card analytics from WB Sales Funnel v3 API into CardAnalyticsDaily.
 
     Fetches views, cart adds, orders, buyouts, conversions per day per product.
     Returns number of daily records upserted.
@@ -593,9 +593,8 @@ async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id:
     MSK = timezone(timedelta(hours=3))
     now_msk = datetime.now(MSK)
     # Fetch last 7 days to keep data fresh (including today)
-    date_from = now_msk - timedelta(days=7)
-    begin = date_from.strftime("%Y-%m-%d 00:00:00")
-    end = now_msk.strftime("%Y-%m-%d 23:59:59")
+    start_date = (now_msk - timedelta(days=7)).strftime("%Y-%m-%d")
+    end_date = now_msk.strftime("%Y-%m-%d")
 
     # Get nm_ids for this account
     result = await db.execute(
@@ -610,9 +609,9 @@ async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id:
     nm_ids = list(nm_to_pid.keys())
 
     try:
-        report_data = await client.get_nm_report_detail_history(nm_ids, begin, end)
+        report_data = await client.get_sales_funnel_history(nm_ids, start_date, end_date)
     except Exception as e:
-        logger.warning("Failed to fetch nm-report for account %d: %s", account_id, e)
+        logger.warning("Failed to fetch sales-funnel for account %d: %s", account_id, e)
         return 0
 
     upserted = 0
@@ -622,6 +621,7 @@ async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id:
         if not product_id:
             continue
 
+        # v3 Sales Funnel response: each item has "history" array with daily data
         history = item.get("history", [])
         for day in history:
             dt_str = day.get("dt", "")
@@ -630,7 +630,11 @@ async def sync_card_analytics(db: AsyncSession, client: WBApiClient, account_id:
             try:
                 day_date = datetime.fromisoformat(dt_str.replace("Z", "+00:00")).date()
             except (ValueError, AttributeError):
-                continue
+                try:
+                    # Fallback: try YYYY-MM-DD format
+                    day_date = datetime.strptime(dt_str[:10], "%Y-%m-%d").date()
+                except (ValueError, AttributeError):
+                    continue
 
             result = await db.execute(
                 select(CardAnalyticsDaily).where(
