@@ -193,12 +193,6 @@ export default function AnalyticsPage() {
     }
   }
 
-  // --- Chart data: Top products ---
-  const topProductsData = (data?.top_products || []).map((p) => ({
-    name: p.title ? (p.title.length > 30 ? p.title.slice(0, 30) + '…' : p.title) : `#${p.nm_id}`,
-    orders: p.orders,
-  }));
-
   // --- Chart data: Weekday ---
   const weekdayData = (data?.weekday_avg || []).map((w) => ({
     day: w.weekday_name,
