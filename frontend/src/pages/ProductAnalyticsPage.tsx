@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Button,
@@ -25,8 +25,19 @@ import {
   ReloadOutlined,
   ShoppingOutlined,
 } from '@ant-design/icons';
-import { Line, Column } from '@ant-design/charts';
 import apiClient from '@/api/client';
+
+// Lazy load charts to prevent silent crashes in production
+const Line = lazy(() => import('@ant-design/charts').then((m) => ({ default: m.Line as any })));
+const ColumnChart = lazy(() => import('@ant-design/charts').then((m) => ({ default: m.Column as any })));
+
+function ChartWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<Spin style={{ display: 'block', textAlign: 'center', padding: 48 }} />}>
+      {children}
+    </Suspense>
+  );
+}
 
 // --- Interfaces ---
 
@@ -365,14 +376,16 @@ export default function ProductAnalyticsPage() {
         {/* Main Chart: Orders */}
         <Card title="Заказы по дням" size="small" style={{ marginTop: 16 }}>
           {ordersChartData.length > 0 ? (
-            <Column
-              data={ordersChartData}
-              xField="date"
-              yField="value"
-              style={{ fill: '#5B8FF9', fillOpacity: 0.85 }}
-              axis={{ y: { title: 'Заказы' } }}
-              height={280}
-            />
+            <ChartWrapper>
+              <ColumnChart
+                data={ordersChartData}
+                xField="date"
+                yField="value"
+                style={{ fill: '#5B8FF9', fillOpacity: 0.85 }}
+                axis={{ y: { title: 'Заказы' } }}
+                height={280}
+              />
+            </ChartWrapper>
           ) : (
             <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
               Нет данных за выбранный период
@@ -385,16 +398,18 @@ export default function ProductAnalyticsPage() {
           <Col xs={24} lg={14}>
             <Card title="Динамика цен" size="small">
               {priceLineData.length > 0 ? (
-                <Line
-                  data={priceLineData}
-                  xField="date"
-                  yField="value"
-                  colorField="type"
-                  style={{ lineWidth: 2 }}
-                  axis={{ y: { title: '₽' } }}
-                  scale={{ color: { range: ['#E8684A', '#5AD8A6'] } }}
-                  height={260}
-                />
+                <ChartWrapper>
+                  <Line
+                    data={priceLineData}
+                    xField="date"
+                    yField="value"
+                    colorField="type"
+                    style={{ lineWidth: 2 }}
+                    axis={{ y: { title: '₽' } }}
+                    scale={{ color: { range: ['#E8684A', '#5AD8A6'] } }}
+                    height={260}
+                  />
+                </ChartWrapper>
               ) : (
                 <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                   Нет данных о ценах
@@ -405,14 +420,16 @@ export default function ProductAnalyticsPage() {
           <Col xs={24} lg={10}>
             <Card title="Заказы по ценам" size="small">
               {ordersByPriceData.length > 0 ? (
-                <Column
-                  data={ordersByPriceData}
-                  xField="price"
-                  yField="orders"
-                  style={{ fill: '#5B8FF9' }}
-                  axis={{ y: { title: 'Заказы' } }}
-                  height={260}
-                />
+                <ChartWrapper>
+                  <ColumnChart
+                    data={ordersByPriceData}
+                    xField="price"
+                    yField="orders"
+                    style={{ fill: '#5B8FF9' }}
+                    axis={{ y: { title: 'Заказы' } }}
+                    height={260}
+                  />
+                </ChartWrapper>
               ) : (
                 <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                   Нет данных
@@ -425,14 +442,16 @@ export default function ProductAnalyticsPage() {
         {/* Third row: Weekday chart */}
         <Card title="Среднее количество заказов по дням недели" size="small" style={{ marginTop: 16 }}>
           {weekdayData.length > 0 ? (
-            <Column
-              data={weekdayData}
-              xField="day"
-              yField="orders"
-              style={{ fill: '#5AD8A6' }}
-              axis={{ y: { title: 'Ср. заказов' } }}
-              height={220}
-            />
+            <ChartWrapper>
+              <ColumnChart
+                data={weekdayData}
+                xField="day"
+                yField="orders"
+                style={{ fill: '#5AD8A6' }}
+                axis={{ y: { title: 'Ср. заказов' } }}
+                height={220}
+              />
+            </ChartWrapper>
           ) : (
             <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
               Нет данных
@@ -444,31 +463,35 @@ export default function ProductAnalyticsPage() {
           <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
             <Col xs={24} lg={14}>
               <Card title="Воронка карточки" size="small">
-                <Line
-                  data={funnelLineData}
-                  xField="date"
-                  yField="value"
-                  colorField="type"
-                  style={{ lineWidth: 2 }}
-                  scale={{ color: { range: ['#8c8c8c', '#fa8c16', '#5B8FF9', '#5AD8A6'] } }}
-                  axis={{ y: { title: 'Количество' } }}
-                  height={260}
-                />
+                <ChartWrapper>
+                  <Line
+                    data={funnelLineData}
+                    xField="date"
+                    yField="value"
+                    colorField="type"
+                    style={{ lineWidth: 2 }}
+                    scale={{ color: { range: ['#8c8c8c', '#fa8c16', '#5B8FF9', '#5AD8A6'] } }}
+                    axis={{ y: { title: 'Количество' } }}
+                    height={260}
+                  />
+                </ChartWrapper>
               </Card>
             </Col>
             <Col xs={24} lg={10}>
               <Card title="Конверсии" size="small">
                 {conversionLineData.length > 0 ? (
-                  <Line
-                    data={conversionLineData}
-                    xField="date"
-                    yField="value"
-                    colorField="type"
-                    style={{ lineWidth: 2 }}
-                    scale={{ color: { range: ['#fa8c16', '#5B8FF9', '#5AD8A6'] } }}
-                    axis={{ y: { title: '%' } }}
-                    height={260}
-                  />
+                  <ChartWrapper>
+                    <Line
+                      data={conversionLineData}
+                      xField="date"
+                      yField="value"
+                      colorField="type"
+                      style={{ lineWidth: 2 }}
+                      scale={{ color: { range: ['#fa8c16', '#5B8FF9', '#5AD8A6'] } }}
+                      axis={{ y: { title: '%' } }}
+                      height={260}
+                    />
+                  </ChartWrapper>
                 ) : (
                   <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: 48 }}>
                     Нет данных о конверсиях
